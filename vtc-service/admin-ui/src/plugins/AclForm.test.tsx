@@ -105,6 +105,34 @@ describe("Access control — roles and capabilities", () => {
     expect(screen.queryByText("Contexts")).toBeNull();
   });
 
+  it("counts the entries in the header and narrows them with the search", async () => {
+    mockFetch([
+      taskRoute(LIST, {
+        entries: [
+          { ...row("did:example:ca", "community-admin", { scope: "ceiling" }), label: "Ops lead" },
+          row("did:example:mem", "member", { scope: "none" }, "none"),
+          row("did:example:rm", "repo-manager", { scope: "ceiling" }),
+        ],
+        truncated: false,
+      }),
+    ]);
+    renderWithProviders(<Acl />, { route: "/acl", path: "/acl" });
+    await screen.findAllByTestId("administers");
+    expect(screen.getByLabelText("3 entries").textContent).toBe("3");
+    // The entry column: label over DID.
+    const ops = screen.getByText("Ops lead").closest("td")!;
+    expect(ops.textContent).toContain("did:example:ca");
+
+    const search = screen.getByRole("searchbox", { name: "Search" });
+    fireEvent.change(search, { target: { value: "repo" } });
+    expect(screen.getAllByTestId("administers")).toHaveLength(1);
+    fireEvent.change(search, { target: { value: "ops" } });
+    expect(screen.getAllByTestId("administers")).toHaveLength(1);
+    fireEvent.change(search, { target: { value: "nobody-here" } });
+    expect(screen.queryAllByTestId("administers")).toHaveLength(0);
+    expect(screen.getByText("No entries match this search")).toBeTruthy();
+  });
+
   it("grants an administrative role narrowed to a qualified capability", async () => {
     const requests = mockFetch([
       taskRoute(LIST, { entries: [], truncated: false }),
@@ -142,7 +170,7 @@ describe("Access control — roles and capabilities", () => {
 
   // The roles form layout: each capability's checkbox sits on the same line as
   // its text, left-aligned (no `.row-actions`, which right-aligns), and the
-  // approve toggle is a checkbox label, not a column `.field`.
+  // approve toggle is a switch label, not a column `.field`.
   it("lays each checkbox out beside its label", async () => {
     mockFetch([taskRoute(LIST, { entries: [], truncated: false })]);
     renderWithProviders(<Acl />, { route: "/acl", path: "/acl" });
@@ -155,8 +183,13 @@ describe("Access control — roles and capabilities", () => {
     expect(label.className).toBe("checkbox");
     expect(label.closest(".row-actions")).toBeNull();
     expect(label.querySelector(".checkbox-text .chip")?.textContent).toBe("confers authority");
-    const approve = screen.getByText("May approve others' actions within this role").closest("label")!;
-    expect(approve.className).toBe("checkbox");
+    // The approve setting is a switch (components/Switch.tsx), still a label
+    // around its control rather than a column `.field`.
+    const approve = screen.getByRole("switch", {
+      name: "May approve others' actions within this role",
+    });
+    expect(approve.closest("label")!.classList.contains("switch")).toBe(true);
+    expect(approve.closest(".field")).toBeNull();
   });
 });
 
@@ -211,7 +244,7 @@ describe("Access control — your own entry (VTI-ACL-052)", () => {
   it("lets you relabel your own entry", async () => {
     const requests = render(false);
     fireEvent.click(await screen.findByTitle("Click to edit label"));
-    const input = await screen.findByDisplayValue("");
+    const input = await screen.findByRole("textbox", { name: `Label for ${ME}` });
     fireEvent.change(input, { target: { value: "laptop" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(sentPayloads(requests, UPDATE)).toHaveLength(1));
@@ -320,5 +353,25 @@ describe("Access control — suspension and remove now", () => {
       subject: OTHER,
       ext: { "org.openvtc": { immediate: { confirm: OTHER } } },
     });
+  });
+});
+
+// The command palette's "Add an access-control entry" and "Invite an
+// administrator" land here with a query string that opens the form.
+describe("Access control — forms opened from the URL", () => {
+  it("opens New ACL entry for ?add=1", async () => {
+    mockFetch([taskRoute(LIST, { entries: [], truncated: false })]);
+    renderWithProviders(<Acl />, { route: "/acl?add=1", path: "/acl" });
+    expect(await screen.findByPlaceholderText("did:key:z6Mk…")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "New ACL entry" })).toBeTruthy();
+  });
+
+  it("opens Invite a new admin for ?invite=1", async () => {
+    mockFetch([
+      taskRoute(LIST, { entries: [], truncated: false }),
+      taskRoute("https://trusttasks.org/spec/vtc/admin/invites/list/0.1", { invites: [] }),
+    ]);
+    renderWithProviders(<Acl />, { route: "/acl?invite=1", path: "/acl" });
+    expect(await screen.findByRole("heading", { name: "Invite a new admin" })).toBeTruthy();
   });
 });

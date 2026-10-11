@@ -1,48 +1,3 @@
-/* ── Theme switcher (segmented) ──────────────────────────────── */
-
-.theme-switcher {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-
-.theme-switcher button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 24px;
-  background: transparent;
-  color: var(--text-muted);
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  padding: 0;
-  transition:
-    background var(--motion-fast),
-    color var(--motion-fast);
-}
-
-.theme-switcher button:hover:not([aria-pressed="true"]) {
-  color: var(--text);
-}
-
-.theme-switcher button[aria-pressed="true"] {
-  background: var(--bg-elev);
-  color: var(--text);
-  box-shadow: 0 0 0 1px var(--border-strong);
-}
-
-.theme-switcher svg {
-  width: 14px;
-  height: 14px;
-  stroke-width: 1.75;
-}
-
 /* ── Page ────────────────────────────────────────────────────── */
 
 .page {
@@ -614,6 +569,56 @@ select {
 
 .toolbar > button {
   flex: 0 0 auto;
+}
+
+/* ── List screens: toolbar over a table card ─────────────────────
+ *
+ * The pattern Members and Access control share (the proposal's Members
+ * mockup): the page header, then a toolbar of filters on the page itself,
+ * then the table in a card that runs to its edges, the header row on the
+ * card's subtle ground. A note about the list sits between the two.
+ */
+
+.list-toolbar {
+  align-items: flex-end;
+}
+
+.list-note {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.card.table-card {
+  padding: 0;
+  gap: 0;
+}
+.card.table-card .data-table th {
+  background: var(--bg-subtle);
+}
+.card.table-card .data-table thead tr:first-child th:first-child {
+  border-top-left-radius: var(--radius-lg);
+}
+.card.table-card .data-table thead tr:first-child th:last-child {
+  border-top-right-radius: var(--radius-lg);
+}
+.card.table-card .data-table th:first-child,
+.card.table-card .data-table td:first-child {
+  padding-left: var(--space-5);
+}
+.card.table-card .data-table th:last-child,
+.card.table-card .data-table td:last-child {
+  padding-right: var(--space-5);
+}
+.card.table-card .data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.card.table-card .data-table tbody tr:hover td {
+  background: var(--bg-hover);
+}
+.card.table-card > .pagination,
+.card.table-card > .table-card-foot {
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border);
 }
 
 /* ── Tables ──────────────────────────────────────────────────── */
@@ -1402,6 +1407,7 @@ select[aria-invalid="true"] {
   font-size: var(--text-xs);
 }
 
+/* A row of checkboxes that are not switches (Vetting's "Methods that count"). */
 .switch-field {
   display: flex;
   align-items: flex-start;
@@ -1419,6 +1425,99 @@ select[aria-invalid="true"] {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+}
+
+/* ── Switch (components/Switch.tsx) ──────────────────────────────
+ *
+ * A native checkbox with `role="switch"`, transparent over a drawn track, so
+ * the click, Space and focus all land on the real control. 32×18 track, 14px
+ * thumb; on is the brand colour, off the faint text grey.
+ */
+
+.switch {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  cursor: pointer;
+  max-width: 100%;
+}
+.switch--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.switch-control {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  width: 32px;
+  height: 18px;
+  margin-top: 1px;
+}
+.switch-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+  z-index: 1;
+}
+.switch-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  /* --text-faint, not a border tone: an off switch's track has to meet 3:1
+   * against the page in both themes (WCAG 1.4.11). */
+  background: var(--text-faint);
+  transition: background var(--motion-fast);
+}
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform var(--motion-fast);
+}
+.switch-input:checked + .switch-track {
+  background: var(--brand);
+}
+.switch-input:checked + .switch-track .switch-thumb {
+  transform: translateX(14px);
+}
+.switch-input:focus-visible + .switch-track {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.switch-input:not(:disabled):hover + .switch-track {
+  box-shadow: 0 0 0 3px var(--brand-tint);
+}
+.switch-label {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+.switch-description {
+  font-size: var(--text-sm);
+}
+@media (forced-colors: active) {
+  .switch-track {
+    border: 1px solid CanvasText;
+  }
+  .switch-input:checked + .switch-track {
+    background: Highlight;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch-track,
+  .switch-thumb {
+    transition: none;
+  }
 }
 
 .color-row {
