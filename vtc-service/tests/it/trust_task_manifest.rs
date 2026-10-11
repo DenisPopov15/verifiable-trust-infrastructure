@@ -453,6 +453,23 @@ const UNPUBLISHED_CANONICAL_OK: &[(&str, usize, &str)] = &[
         1,
         "framework error envelope — a response type, not a task; absent from the task index by design",
     ),
+    // Direct admission (`ceremony::admission`): adding a member without a join
+    // request, and making an existing ACL entry a membership. Bound ahead of
+    // their specifications, on local wire types marked for replacement
+    // (`trust_tasks::admission_tasks`); the drafts are in the pull request
+    // that added them. Debt, to fall back to zero when trust-tasks-rs serves
+    // them — the same round trip `webvh/servers/reconcile` made.
+    (
+        "https://trusttasks.org/spec/vtc/members/admit/",
+        1,
+        "direct admission — specification drafted, not yet published upstream",
+    ),
+    (
+        "https://trusttasks.org/spec/vtc/members/make-membership/",
+        1,
+        "direct admission of an existing ACL entry — specification drafted, not yet published \
+         upstream",
+    ),
     // The vault archival lifecycle (PR #540): archive, unarchive, restore,
     // purge. Authored as local "openvtc 0.1 extensions" and never taken
     // upstream, so each claims a `trusttasks.org/spec/vault/` ID the registry
@@ -827,6 +844,10 @@ const SPINE_DOCUMENT_TYPES: &[&str] = &[
     "https://trusttasks.org/spec/vtc/roles/define/0.1",
     "https://trusttasks.org/spec/vtc/roles/delete/0.1",
     "https://trusttasks.org/spec/task-consent/decision/0.2",
+    // Direct admission (`trust_tasks::admission_tasks`): signed documents only,
+    // with no REST door.
+    "https://trusttasks.org/spec/vtc/members/admit/0.1",
+    "https://trusttasks.org/spec/vtc/members/make-membership/0.1",
     // Their bearer routes stayed for `vtc-client`; the console already signed
     // them, and now nothing else binds them either.
     "https://trusttasks.org/spec/vtc/join-requests/decide/0.1",
