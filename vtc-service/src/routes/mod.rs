@@ -533,9 +533,9 @@ fn build_api_chain(
         // REST mounts had no caller left once `vtc-client` and the admin
         // console signed them instead.
         // Whether the join manifest answers a caller this community cannot
-        // identify. Admin REST with no Trust Task of its own — and not a
+        // identify (`vtc/community/join-discovery/{show,update}/0.1`) — not a
         // member of the profile, whose `show` response is a published schema
-        // that permits no new ones.
+        // that permits no new ones. A signed document only, with no route.
         // The runtime configuration (`config/{show,patch,reload,restart}/0.1`)
         // has no route: each is a signed document served by the spine
         // (`trust_tasks::admin_tasks`) on every transport.
@@ -651,14 +651,11 @@ fn build_api_chain(
         // `handle_relationships_revoke_v0_2`).
         // Suspend and restore (#1079) are `vtc/relationships/{suspend,restore}`
         // on the spine (`trust_tasks::surface_tasks`), and have no route.
-        // #1067 — the VPC (persona annotation) on an existing
-        // edge. POST + DELETE share one task mount, the same
-        // workaround the personhood assert/revoke pair uses; the
-        // two verbs are one operation in either direction.
-        .routes(tt(
-            routes!(relationships::attach_persona, relationships::detach_persona),
-            "https://trusttasks.org/spec/vtc/relationships/persona/0.1",
-        ))
+        // The persona annotation (VPC, #1067) has no route: it had no Trust
+        // Task specification and no caller, and how a VPC binds to an edge is
+        // still open upstream (trustoverip/dtgwg-cred-spec#9). Stored edges
+        // keep their `persona` field; see
+        // `docs/05-design-notes/vpc-persona-annotation.md`.
         // Phase 4 M4.8.1 — operator-uploaded endorsement type registry. The
         // listing is REST; `register` and `delete` are signed documents only.
         // The community schema store (Issues + Accepts registry) is
@@ -1280,16 +1277,6 @@ mod openapi_tests {
             "POST",
             "/v1/credential-exchange/request",
             "redeems a credential offer; the key-binding proof is the authority, kept on its own              governed mount alongside the generic Trust Task door",
-        ),
-        (
-            "DELETE",
-            "/v1/relationships/{id}/persona",
-            "`vtc/relationships/persona/0.1` is published but REST-only — the spine does not dispatch it",
-        ),
-        (
-            "POST",
-            "/v1/relationships/{id}/persona",
-            "`vtc/relationships/persona/0.1` is published but REST-only — the spine does not dispatch it",
         ),
         (
             "POST",
