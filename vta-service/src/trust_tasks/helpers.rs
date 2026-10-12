@@ -58,6 +58,43 @@ pub(super) const TRANSPORT_TRUST_TASK: &str = "trust-task";
 pub(crate) struct TrustTaskOutcome {
     pub(crate) status: StatusCode,
     pub(crate) body: Vec<u8>,
+    pub(crate) restart: bool,
+}
+
+impl TrustTaskOutcome {
+    pub(crate) fn with_restart(mut self) -> Self {
+        self.restart = true;
+        self
+    }
+}
+
+impl TrustTaskOutcome {
+    /// The response, holding `restart` until the body has been handed to the
+    /// connection — dropped with the body, it fires then, and on a client that
+    /// hangs up too. `Content-Length` is set so the reply stays unchunked.
+    pub(crate) fn into_response_firing(self, restart: crate::server::RestartOnDrop) -> Response {
+        use futures_util::StreamExt;
+        let len = self.body.len();
+        let chunk = axum::body::Bytes::from(self.body);
+        let stream = futures_util::stream::iter([Ok::<_, std::convert::Infallible>(chunk)]).map(
+            move |chunk| {
+                let _held = &restart;
+                chunk
+            },
+        );
+        (
+            self.status,
+            [
+                (
+                    axum::http::header::CONTENT_TYPE,
+                    "application/json".to_string(),
+                ),
+                (axum::http::header::CONTENT_LENGTH, len.to_string()),
+            ],
+            axum::body::Body::from_stream(stream),
+        )
+            .into_response()
+    }
 }
 
 impl IntoResponse for TrustTaskOutcome {
@@ -472,6 +509,7 @@ pub(super) fn success_response<R: serde::Serialize>(
     TrustTaskOutcome {
         status: StatusCode::OK,
         body,
+        restart: false,
     }
 }
 
@@ -493,6 +531,7 @@ pub(super) fn silence() -> TrustTaskOutcome {
     TrustTaskOutcome {
         status: StatusCode::NO_CONTENT,
         body: Vec::new(),
+        restart: false,
     }
 }
 
@@ -620,7 +659,11 @@ pub(super) fn error_response(err_doc: ErrorResponse) -> TrustTaskOutcome {
     let status = StatusCode::from_u16(status_for_code(&err_doc.payload.code))
         .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let body = serde_json::to_vec(&err_doc).unwrap_or_else(|_| Vec::new());
-    TrustTaskOutcome { status, body }
+    TrustTaskOutcome {
+        status,
+        body,
+        restart: false,
+    }
 }
 
 /// The framework's error-document Type URI — the one `TrustTask::reject_with`
