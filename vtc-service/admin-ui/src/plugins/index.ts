@@ -23,6 +23,7 @@ import {
   ListChecks,
   Network,
   PenLine,
+  ScanLine,
   Share2,
   ShieldCheck,
   Smartphone,
@@ -54,6 +55,7 @@ import { RoomUsage } from "@/plugins/roomUsage";
 import { Rooms } from "@/plugins/rooms";
 import { Sessions } from "@/plugins/sessions";
 import { Vetting } from "@/plugins/vetting";
+import { WalletVerifier } from "@/plugins/walletVerifier";
 
 export function registerBuiltinPlugins(): void {
   // ── Overview ──
@@ -198,6 +200,16 @@ export function registerBuiltinPlugins(): void {
     iconComponent: Network,
     reactComponent: Recognition,
     capabilities: ["vtc.registry.admin"],
+  });
+
+  registerPlugin({
+    id: "wallet-verifier",
+    group: "community",
+    label: "Wallet verifier",
+    path: "/wallet-verifier",
+    iconComponent: ScanLine,
+    reactComponent: WalletVerifier,
+    capabilities: ["vtc.config.admin"],
   });
 
   registerPlugin({
