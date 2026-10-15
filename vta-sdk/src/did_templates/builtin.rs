@@ -17,6 +17,7 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "did-host-http-tsp",
     "did-host-tsp",
     "didcomm-mediator",
+    "dtg-witness",
     "push-gateway",
     "room",
     "room-host",
@@ -39,6 +40,7 @@ const DID_HOST_HTTP: &str = include_str!("../../templates/did-host-http.json");
 const DID_HOST_DIDCOMM: &str = include_str!("../../templates/did-host-didcomm.json");
 const DID_HOST_HTTP_TSP: &str = include_str!("../../templates/did-host-http-tsp.json");
 const DID_HOST_TSP: &str = include_str!("../../templates/did-host-tsp.json");
+const DTG_WITNESS: &str = include_str!("../../templates/dtg-witness.json");
 
 /// Load a built-in template by name. Returns [`TemplateError::BuiltinNotFound`]
 /// for any name not in [`BUILTIN_NAMES`]. The legacy `webvh-*` / `did-hosting-*`
@@ -60,6 +62,7 @@ pub fn load_embedded(name: &str) -> Result<DidTemplate, TemplateError> {
         "did-host-didcomm" => DID_HOST_DIDCOMM,
         "did-host-http-tsp" => DID_HOST_HTTP_TSP,
         "did-host-tsp" => DID_HOST_TSP,
+        "dtg-witness" => DTG_WITNESS,
         _ => return Err(TemplateError::BuiltinNotFound(name.to_string())),
     };
     let value: serde_json::Value = serde_json::from_str(raw)?;
@@ -101,6 +104,7 @@ mod tests {
             DID_HOST_DIDCOMM,
             DID_HOST_HTTP_TSP,
             DID_HOST_TSP,
+            DTG_WITNESS,
         ];
         assert_eq!(raws.len(), BUILTIN_NAMES.len(), "a builtin is missing here");
         for raw in raws {
