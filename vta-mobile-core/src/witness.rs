@@ -6,7 +6,7 @@
 //! holds neither the relationship DID's signing key nor the credentials — its VTA does — so the
 //! VTA builds and signs every document **as the relationship DID**, and the wallet **carries**
 //! them: it sends each one to the witness from the relationship DID and hands each answer back.
-//! The VTA never contacts the witness (`vta/_shared/0.5/CONVENTIONS.md`).
+//! The VTA never contacts the witness (`vta/_shared/0.6/CONVENTIONS.md`).
 //!
 //! The round, as the native app drives it:
 //!
@@ -21,6 +21,10 @@
 //!    principal's presentations; CONVENTIONS §6).
 //! 4. [`WitnessTask::Accept`] with `{sessionId, response: <the witness's answer>}` → the VTA;
 //!    `{credentialId, witness, vwcDigestMultibase, evidence}`: the VWC is stored.
+//!
+//! [`WitnessTask::List`] (`{relationshipDid?, witness?, pageSize?, cursor?}`) reads back every
+//! stored VWC with that same evidence, oldest first; a page with `truncated: true` continues with
+//! its `cursor`. Present to a verifier only the VWCs the user selects.
 //!
 //! A refusal from the witness ([`WitnessReply::Refused`]) ends the session at the wallet and is
 //! **not** handed back; the VTA's record expires on its own. Open a new session to try again.
@@ -41,6 +45,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use trust_tasks_rs::specs::vta::witness as vta_witness;
 use trust_tasks_rs::specs::witness::session;
+use trust_tasks_rs::validate::ValidatedPayload;
 use trust_tasks_rs::{ErrorPayload, Payload, TrustTask};
 use vta_sdk::inbound::{Inbound, classify};
 use vta_sdk::protocol::matching::{Protocol, ServiceCapabilities, select_protocol};
@@ -53,28 +58,31 @@ use crate::session::AuthEnvelope;
 /// The `vta/witness/*` task a document is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum WitnessTask {
-    /// `vta/witness/open/0.1` — the `witness/session` document to carry.
+    /// `vta/witness/open/0.2` — the `witness/session` document to carry.
     Open,
-    /// `vta/witness/present/0.1` — hand back the session answer; the submit document to carry.
+    /// `vta/witness/present/0.2` — hand back the session answer; the submit document to carry.
     Present,
-    /// `vta/witness/accept/0.1` — hand back the submit answer; the stored VWC.
+    /// `vta/witness/accept/0.2` — hand back the submit answer; the stored VWC.
     Accept,
+    /// `vta/witness/list/0.1` — read back the stored VWCs, each with its outcome evidence as
+    /// stored: how a wallet that lost `accept`'s answer, or a second device, rebuilds its record.
+    List,
 }
 
 /// The document of the session the wallet is about to carry to the witness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum WitnessDocument {
-    /// `witness/session/0.1`, from [`WitnessTask::Open`].
+    /// `witness/session/0.2`, from [`WitnessTask::Open`].
     Session,
-    /// `witness/session/submit/0.1`, from [`WitnessTask::Present`].
+    /// `witness/session/submit/0.2`, from [`WitnessTask::Present`].
     Submit,
 }
 
 impl WitnessDocument {
     fn type_uri(self) -> &'static str {
         match self {
-            Self::Session => <session::v0_1::Payload as Payload>::TYPE_URI,
-            Self::Submit => <session::submit::v0_1::Payload as Payload>::TYPE_URI,
+            Self::Session => <session::v0_2::Payload as Payload>::TYPE_URI,
+            Self::Submit => <session::submit::v0_2::Payload as Payload>::TYPE_URI,
         }
     }
 }
@@ -147,12 +155,18 @@ fn decode<E: std::fmt::Display>(e: E) -> FfiError {
     }
 }
 
-fn signed<P: Payload + Serialize + DeserializeOwned>(
+fn signed<P: Payload + Serialize + DeserializeOwned + ValidatedPayload>(
     env: &AuthEnvelope,
     payload_json: &str,
     signer: &dyn Signer,
 ) -> Result<String, FfiError> {
-    let payload: P = serde_json::from_str(payload_json).map_err(invalid)?;
+    // The schema first (a bound like `pageSize ≤ 100` is the schema's, not the type's), then
+    // the generated type.
+    let value: Value = serde_json::from_str(payload_json).map_err(invalid)?;
+    P::validate_value(&value).map_err(|e| FfiError::InvalidInput {
+        reason: format!("the payload does not match the task's schema: {e}"),
+    })?;
+    let payload: P = serde_json::from_value(value).map_err(invalid)?;
     let issued_at = chrono::DateTime::parse_from_rfc3339(&env.issued_at)
         .map_err(|e| FfiError::InvalidInput {
             reason: format!("issued_at is not an RFC 3339 timestamp: {e}"),
@@ -186,9 +200,10 @@ pub fn build_witness_task(
     let s = &*signer;
     let p = payload_json.as_str();
     match task {
-        WitnessTask::Open => signed::<vta_witness::open::v0_1::Payload>(&env, p, s),
-        WitnessTask::Present => signed::<vta_witness::present::v0_1::Payload>(&env, p, s),
-        WitnessTask::Accept => signed::<vta_witness::accept::v0_1::Payload>(&env, p, s),
+        WitnessTask::Open => signed::<vta_witness::open::v0_2::Payload>(&env, p, s),
+        WitnessTask::Present => signed::<vta_witness::present::v0_2::Payload>(&env, p, s),
+        WitnessTask::Accept => signed::<vta_witness::accept::v0_2::Payload>(&env, p, s),
+        WitnessTask::List => signed::<vta_witness::list::v0_1::Payload>(&env, p, s),
     }
 }
 
@@ -200,9 +215,10 @@ pub fn build_witness_task(
 pub fn parse_witness_response(task: WitnessTask, json: String) -> Result<String, FfiError> {
     let j = json.as_str();
     match task {
-        WitnessTask::Open => response::<vta_witness::open::v0_1::Response>(j),
-        WitnessTask::Present => response::<vta_witness::present::v0_1::Response>(j),
-        WitnessTask::Accept => response::<vta_witness::accept::v0_1::Response>(j),
+        WitnessTask::Open => response::<vta_witness::open::v0_2::Response>(j),
+        WitnessTask::Present => response::<vta_witness::present::v0_2::Response>(j),
+        WitnessTask::Accept => response::<vta_witness::accept::v0_2::Response>(j),
+        WitnessTask::List => response::<vta_witness::list::v0_1::Response>(j),
     }
 }
 
@@ -311,8 +327,8 @@ fn classify_verified(reply_json: String, reply: &Value) -> Result<WitnessReply, 
 }
 
 fn refusal_for(code: &str) -> WitnessRefusal {
-    use session::submit::v0_1::error_codes as submit;
-    use session::v0_1::error_codes as open;
+    use session::submit::v0_2::error_codes as submit;
+    use session::v0_2::error_codes as open;
     if code == open::REFUSED.code {
         WitnessRefusal::SessionRefused
     } else if code == submit::CHALLENGE_MISMATCH.code {
@@ -388,7 +404,7 @@ mod tests {
     fn session_doc() -> Value {
         json!({
             "id": SESSION,
-            "type": <session::v0_1::Payload as Payload>::TYPE_URI,
+            "type": <session::v0_2::Payload as Payload>::TYPE_URI,
             "issuer": did_for(RELATIONSHIP),
             "recipient": did_for(WITNESS),
             "issuedAt": "2026-10-15T10:00:00Z",
@@ -400,7 +416,7 @@ mod tests {
     fn submit_doc() -> Value {
         json!({
             "id": "urn:uuid:submit-1",
-            "type": <session::submit::v0_1::Payload as Payload>::TYPE_URI,
+            "type": <session::submit::v0_2::Payload as Payload>::TYPE_URI,
             "threadId": SESSION,
             "issuer": did_for(RELATIONSHIP),
             "recipient": did_for(WITNESS),
@@ -464,7 +480,7 @@ mod tests {
     fn answer(payload: Value) -> Value {
         json!({
             "id": "urn:uuid:answer-1",
-            "type": format!("{}#response", <session::v0_1::Payload as Payload>::TYPE_URI),
+            "type": format!("{}#response", <session::v0_2::Payload as Payload>::TYPE_URI),
             "threadId": SESSION,
             "issuer": did_for(WITNESS),
             "recipient": did_for(RELATIONSHIP),
@@ -607,5 +623,49 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, FfiError::InvalidInput { .. }), "{err:?}");
+    }
+
+    /// `vta/witness/list`: a page size the schema refuses is never signed, and a response is
+    /// checked against the generated type before it is handed back.
+    #[test]
+    fn list_is_checked_both_ways() {
+        struct Refuse;
+        impl Signer for Refuse {
+            fn did(&self) -> String {
+                "did:key:z6MkHolder".into()
+            }
+            fn sign(&self, _payload: Vec<u8>) -> Result<Vec<u8>, FfiError> {
+                panic!("the signer must not be reached");
+            }
+        }
+        let env = AuthEnvelope {
+            id: "urn:uuid:2".into(),
+            holder_did: "did:key:z6MkHolder".into(),
+            vta_did: "did:key:z6MkVta".into(),
+            issued_at: "2026-10-16T09:00:00Z".into(),
+        };
+        let err = build_witness_task(
+            env,
+            WitnessTask::List,
+            r#"{"pageSize":101}"#.into(),
+            Box::new(Refuse),
+        )
+        .unwrap_err();
+        assert!(matches!(err, FfiError::InvalidInput { .. }), "{err:?}");
+
+        let list_type = <vta_witness::list::v0_1::Payload as Payload>::TYPE_URI;
+        let page = serde_json::json!({
+            "id": "urn:uuid:r",
+            "type": format!("{list_type}#response"),
+            "threadId": "urn:uuid:2",
+            "payload": { "witnessings": [], "truncated": false },
+        });
+        let parsed = parse_witness_response(WitnessTask::List, page.to_string()).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&parsed).unwrap(),
+            serde_json::json!({ "witnessings": [], "truncated": false })
+        );
+        let bad = serde_json::json!({ "payload": { "witnessings": [] } });
+        assert!(parse_witness_response(WitnessTask::List, bad.to_string()).is_err());
     }
 }

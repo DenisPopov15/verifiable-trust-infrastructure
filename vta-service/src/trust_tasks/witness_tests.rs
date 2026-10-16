@@ -2,7 +2,7 @@
 //! (`vti_witness::dispatch::answer`, the same dispatch core `vti-witness run` puts behind its
 //! sockets). The test is the client: it carries each document the VTA builds to the witness,
 //! from the relationship DID, and hands each answer back — exactly the carriage of
-//! `vta/_shared/0.5/CONVENTIONS.md`.
+//! `vta/_shared/0.6/CONVENTIONS.md`.
 //!
 //! The relationship DID is a `did:peer:2` whose signing key the VTA holds (the shape openvtc
 //! mints), the member DID a `did:key` the VTA holds, and the witness and the community are
@@ -168,7 +168,6 @@ impl World {
         }
         let community = Key::new();
         let witness = Witness::new(vec![community.did.clone()]);
-        state.config.write().await.witness.member_link_witnesses = vec![witness.did().to_string()];
 
         // The relationship DID: a did:peer:2 over a key minted in CTX.
         let raw = crate::operations::persona::test_fixture::mint_key(
@@ -337,7 +336,7 @@ impl World {
         handle_open(
             &self.state,
             auth,
-            doc(uris::TASK_VTA_WITNESS_OPEN_0_1, payload),
+            doc(uris::TASK_VTA_WITNESS_OPEN_0_2, payload),
         )
         .await
     }
@@ -352,7 +351,7 @@ impl World {
             &self.state,
             auth,
             doc(
-                uris::TASK_VTA_WITNESS_PRESENT_0_1,
+                uris::TASK_VTA_WITNESS_PRESENT_0_2,
                 json!({ "sessionId": session, "response": response }),
             ),
         )
@@ -369,7 +368,7 @@ impl World {
             &self.state,
             auth,
             doc(
-                uris::TASK_VTA_WITNESS_ACCEPT_0_1,
+                uris::TASK_VTA_WITNESS_ACCEPT_0_2,
                 json!({ "sessionId": session, "response": response }),
             ),
         )
@@ -393,7 +392,7 @@ impl World {
         assert!(
             outcome["type"]
                 .as_str()
-                .is_some_and(|t| t.ends_with("submit/0.1#response")),
+                .is_some_and(|t| t.ends_with("submit/0.2#response")),
             "the witness accepted the submission: {outcome:#}"
         );
         (session, session_doc, session_answer, outcome)
@@ -403,7 +402,8 @@ impl World {
 // ── The happy paths ─────────────────────────────────────────────────────
 
 /// The whole family under the member link: the VTA signs the session and the submission as the
-/// relationship DID (never as itself), the member presentation rides in the OpenVTC carriage,
+/// relationship DID (never as itself), the member presentation rides in the submit payload's
+/// own `memberPresentation` (`witness/session/submit/0.2`),
 /// the real witness mints a VWC, and the VTA verifies and stores it with its evidence.
 #[tokio::test]
 async fn witnessed_end_to_end_through_the_member_link() {
@@ -439,7 +439,11 @@ async fn witnessed_end_to_end_through_the_member_link() {
     let submit = &presented["document"];
     assert_eq!(submit["issuer"], w.relationship);
     assert_eq!(submit["threadId"], session);
-    let member_vp = &submit["payload"]["ext"]["org.openvtc.witness"]["memberPresentation"];
+    assert!(
+        submit["payload"].get("ext").is_none(),
+        "no vendor-extension carriage: {submit:#}"
+    );
+    let member_vp = &submit["payload"]["memberPresentation"];
     assert_eq!(
         member_vp["holder"], w.member,
         "the member presentation is the member DID's"
@@ -593,7 +597,7 @@ async fn a_vwc_from_another_session_is_refused() {
     // The witness's own key, answering this session with the other session's VWC.
     let mut forged: TrustTask<Value> = serde_json::from_value(json!({
         "id": urn(),
-        "type": <trust_tasks_rs::specs::witness::session::submit::v0_1::Response
+        "type": <trust_tasks_rs::specs::witness::session::submit::v0_2::Response
             as trust_tasks_rs::Payload>::TYPE_URI,
         "issuer": w.witness.did(),
         "recipient": w.relationship,
@@ -648,6 +652,36 @@ async fn session_unknown_says_nothing_about_why() {
     );
 }
 
+/// A session is continued only by the version that opened it (`vta/_shared/0.6` conventions):
+/// a record whose session document is not a `witness/session/0.2` — one a 0.1 open left behind
+/// — is `sessionUnknown` to the 0.2 tasks.
+#[tokio::test]
+async fn a_session_opened_at_another_version_is_unknown() {
+    let w = World::new(true).await;
+    let opened = ok(&w.open_as(&w.auth, w.open_payload(true)).await);
+    let session = opened["sessionId"].as_str().unwrap();
+    let answer = w.witness.carry(&w.relationship, &opened["document"]).await;
+
+    let key = format!("session:{session}");
+    let raw = w
+        .state
+        .witness_sessions_ks
+        .get_raw(key.clone())
+        .await
+        .unwrap()
+        .expect("the open session's record");
+    let mut record: Value = serde_json::from_slice(&raw).unwrap();
+    record["sessionDocument"]["type"] = json!("https://trusttasks.org/spec/witness/session/0.1");
+    w.state
+        .witness_sessions_ks
+        .insert(key, &record)
+        .await
+        .unwrap();
+
+    let out = w.present_as(&w.auth, session, &answer).await;
+    assert_eq!(code(&out), "vta/witness/present:sessionUnknown");
+}
+
 // ── Custody and authorization ───────────────────────────────────────────
 
 /// A caller who may not act where the relationship DID's key is held cannot act as it, and the
@@ -687,6 +721,180 @@ async fn sign_alone_does_not_satisfy_witness_request() {
     assert!(body(&out).to_string().contains("WitnessRequest"));
 }
 
+// ── vta/witness/list ────────────────────────────────────────────────────
+
+impl World {
+    async fn list_as(&self, auth: &AuthClaims, payload: Value) -> TrustTaskOutcome {
+        handle_list(
+            &self.state,
+            auth,
+            doc(uris::TASK_VTA_WITNESS_LIST_0_1, payload),
+        )
+        .await
+    }
+
+    /// A whole round, accepted: the accept answer's payload.
+    async fn witnessed(&self) -> Value {
+        let (session, _, _, outcome) = self.run_to_outcome(true).await;
+        ok(&self.accept_as(&self.auth, &session, &outcome).await)
+    }
+}
+
+/// What accept answered is what list reads back: the same handle, witness, digest, and both
+/// evidence documents byte for byte — never rebuilt or re-signed.
+#[tokio::test]
+async fn list_reads_back_what_accept_stored_byte_for_byte() {
+    let w = World::new(true).await;
+    let accepted = w.witnessed().await;
+
+    let listed = ok(&w.list_as(&w.auth, json!({})).await);
+    let entries = listed["witnessings"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "{listed:#}");
+    let e = &entries[0];
+    assert_eq!(e["credentialId"], accepted["credentialId"]);
+    assert_eq!(e["witness"], accepted["witness"]);
+    assert_eq!(e["relationshipDid"], w.relationship);
+    assert_eq!(e["vwcDigestMultibase"], accepted["vwcDigestMultibase"]);
+    assert!(e["acceptedAt"].as_str().is_some());
+    for part in ["session", "outcome"] {
+        assert_eq!(
+            serde_json::to_string(&e["evidence"][part]).unwrap(),
+            serde_json::to_string(&accepted["evidence"][part]).unwrap(),
+            "evidence.{part} is returned exactly as stored"
+        );
+    }
+    assert_eq!(listed["truncated"], false);
+    assert!(listed.get("cursor").is_none(), "{listed:#}");
+}
+
+/// Both filters apply, and a filter that matches nothing is an empty page.
+#[tokio::test]
+async fn list_applies_its_filters() {
+    let w = World::new(true).await;
+    w.witnessed().await;
+    let count = |v: Value| v["witnessings"].as_array().unwrap().len();
+
+    let rel = ok(&w
+        .list_as(&w.auth, json!({ "relationshipDid": w.relationship }))
+        .await);
+    assert_eq!(count(rel), 1);
+    let by_witness = ok(&w
+        .list_as(&w.auth, json!({ "witness": w.witness.did() }))
+        .await);
+    assert_eq!(count(by_witness), 1);
+    let other_rel = ok(&w
+        .list_as(&w.auth, json!({ "relationshipDid": w.counterparty }))
+        .await);
+    assert_eq!(count(other_rel), 0);
+    let other_witness = ok(&w
+        .list_as(&w.auth, json!({ "witness": Key::new().did }))
+        .await);
+    assert_eq!(count(other_witness), 0);
+}
+
+/// A DID this agent does not hold, and one held where the caller cannot act, answer the same
+/// empty page — never a refusal — so the listing says nothing about DIDs the caller cannot see.
+#[tokio::test]
+async fn list_answers_unreachable_and_unknown_alike() {
+    let w = World::new(true).await;
+    w.witnessed().await;
+
+    let elsewhere = claims(Role::Admin, OTHER);
+    let unreachable = w
+        .list_as(&elsewhere, json!({ "relationshipDid": w.relationship }))
+        .await;
+    let unknown = w
+        .list_as(&w.auth, json!({ "relationshipDid": Key::new().did }))
+        .await;
+    let everything_elsewhere = w.list_as(&elsewhere, json!({})).await;
+    for out in [&unreachable, &unknown, &everything_elsewhere] {
+        assert_eq!(
+            ok(out),
+            json!({ "witnessings": [], "truncated": false }),
+            "{:#}",
+            body(out)
+        );
+    }
+}
+
+/// Oldest first, `pageSize` honoured, a cursor that continues without repeating, and one it
+/// cannot honour is `cursorInvalid`.
+#[tokio::test]
+async fn list_pages_oldest_first_with_an_opaque_cursor() {
+    let w = World::new(true).await;
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        ids.push(w.witnessed().await["credentialId"].clone());
+    }
+
+    let first = ok(&w.list_as(&w.auth, json!({ "pageSize": 2 })).await);
+    assert_eq!(first["truncated"], true, "{first:#}");
+    let cursor = first["cursor"]
+        .as_str()
+        .expect("a cursor to continue")
+        .to_string();
+    let second = ok(&w
+        .list_as(&w.auth, json!({ "pageSize": 2, "cursor": cursor }))
+        .await);
+    assert_eq!(second["truncated"], false, "{second:#}");
+    assert!(second.get("cursor").is_none());
+
+    let seen: Vec<Value> = first["witnessings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(second["witnessings"].as_array().unwrap())
+        .map(|e| e["credentialId"].clone())
+        .collect();
+    assert_eq!(seen.len(), 3, "every stored VWC once: {seen:?}");
+    let mut sorted = seen.clone();
+    sorted.sort_by_key(|v| v.to_string());
+    let mut expected = ids.clone();
+    expected.sort_by_key(|v| v.to_string());
+    assert_eq!(sorted, expected);
+    let at: Vec<String> = first["witnessings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(second["witnessings"].as_array().unwrap())
+        .map(|e| e["acceptedAt"].as_str().unwrap().to_string())
+        .collect();
+    let mut ordered = at.clone();
+    ordered.sort();
+    assert_eq!(at, ordered, "oldest first");
+
+    for bad in ["not-a-cursor", "w1.!!!", "w1.Zm9v"] {
+        let out = w.list_as(&w.auth, json!({ "cursor": bad })).await;
+        assert_eq!(code(&out), "vta/witness/list:cursorInvalid", "{bad}");
+    }
+}
+
+/// Only active vault entries are listed: an archived VWC is not.
+#[tokio::test]
+async fn list_omits_an_archived_witness_credential() {
+    let w = World::new(true).await;
+    let accepted = w.witnessed().await;
+    let id = accepted["credentialId"].as_str().unwrap();
+    let mut stored = crate::vault::storage::get(&w.state.vault_ks, id)
+        .await
+        .unwrap()
+        .unwrap();
+    stored.lifecycle = vti_common::vault::VaultStatus::Archived;
+    crate::vault::storage::put(&w.state.vault_ks, &stored)
+        .await
+        .unwrap();
+    let listed = ok(&w.list_as(&w.auth, json!({})).await);
+    assert_eq!(listed["witnessings"], json!([]));
+}
+
+/// Gated like the family: `sign` alone is not `witness-request`.
+#[tokio::test]
+async fn list_needs_witness_request_not_sign() {
+    let w = World::new(true).await;
+    let out = w.list_as(&claims(Role::Application, CTX), json!({})).await;
+    assert_eq!(code(&out), "permissionDenied");
+}
+
 // ── open's other refusals ───────────────────────────────────────────────
 
 #[tokio::test]
@@ -720,19 +928,6 @@ async fn open_refuses_what_cannot_succeed_before_anything_is_disclosed() {
     let mut p = w.open_payload(true);
     p["witness"] = json!(w.counterparty);
     assert_eq!(code(&w.open_as(&w.auth, p).await), "malformedRequest");
-
-    // The member link, for a witness whose carriage this VTA does not know.
-    w.state
-        .config
-        .write()
-        .await
-        .witness
-        .member_link_witnesses
-        .clear();
-    assert_eq!(
-        code(&w.open_as(&w.auth, w.open_payload(true)).await),
-        "vta/witness/open:memberLinkUnsupported"
-    );
 
     // Nothing above left a session behind.
     assert!(
