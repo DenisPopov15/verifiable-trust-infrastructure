@@ -296,12 +296,11 @@ admin read.
 ### 5.2 Community default
 
 The community sets the *initial* listing for new cards
-(`directory.defaultListing`, default `listed`) and a floor it will honour
-(`directory.minimumListing`, default `hidden`, which lets anyone hide).
-Big or sensitive communities set `defaultListing = findable` or
-`hidden`. A community **cannot** force an entry above the member's
-choice. Raising the default changes new cards only, and parks like any
-privacy-affecting change.
+(`directory.defaultListing`, default `listed`). Every member may always
+choose `hidden`. There is no floor, because a floor would let the
+community widen a member's choice (DIR-003). Big or sensitive communities
+set `defaultListing = findable` or `hidden`. Raising the default changes
+new cards only, and parks like any privacy-affecting change.
 
 ### 5.3 External (trust registry)
 
@@ -692,7 +691,14 @@ credential** to each of its members, just as a community room does.
   `issuesCredentials` (default `true`) turns this off for a group that
   doesn't need it.
 - **Revocation.** Leaving the group, leaving the community, or deleting
-  the group revokes the VMC on the group's status list. Deleting a group
+  the group revokes the VMC.
+  - **Open.** A status list per group breaks herd privacy (VTI-CRD-014):
+    a ten-member group's list singles its members out.
+  - The options are short-lived group VMCs renewed while the member
+    stays (expiry is the revocation, as room authority renewal does), or
+    entries on the community's large shared list.
+  - Recommendation: short-lived and renewed, because it needs no list
+    the issuer does not sign. Deleting a group
   also revokes its VAC, and the reconciler of §9.3 owns those retries.
 - **Not authority at the VTC.** The group VMC is evidence for **others**:
   - a room admitting by presentation;
