@@ -582,6 +582,13 @@ Membership is recomputed whenever a fact it reads changes (the
 storage-seam events that already feed `admin_events`). A sweeper
 reconciles every few minutes.
 
+A member may **opt out** of any dynamic group: `leave` records an
+exclusion and `join` undoes it. An opted-out member is not a member, so
+their group VMC stops renewing and room bindings treat them as gone.
+Because a dynamic group never confers authority, nothing the community
+relies on depends on it, and the community never overrides the member's
+choice.
+
 Dynamic groups are for **organising, browsing, room access and future
 chat**. They never confer authority (§9.4). Entra refuses to make a
 dynamic group role-assignable for the same reason: a rule change could
@@ -671,6 +678,19 @@ Or, by reference, a defined role's capability set:
 Every community group has **its own DID** and issues a **membership
 credential** to each of its members, just as a community room does.
 
+- **Signing.** The VTA signs both credentials through the generic
+  `keys/sign-document/0.1`. The custodian builds a Data Integrity proof
+  with a named key, under its own `sign-document` capability. The task
+  refuses a document whose `issuer` is not the key's DID, and `sign` is
+  never accepted in its place.
+  - There is no groups-specific signer. The VTC is the authority on group
+    membership and the VTA is only its custodian, as with rooms.
+  - `keys/sign` cannot do this job, because it frames caller bytes
+    (`SigningDomain::Opaque`).
+- **Template.** `vtc-group` is did:webvh with a signing key and a
+  key-agreement key. It has **no service**, because nothing serves
+  messages to a group yet; group chat adds one by DID update. It has **no
+  label variable**.
 - **Minting.** `groups/create` asks the community's own VTA, over
   `vta_link`, to mint the group's DID from a DID template (working name
   `vtc-group`), exactly as a community room's DID is minted from the
@@ -702,7 +722,8 @@ credential** to each of its members, just as a community room does.
     single its members out (VTI-CRD-014).
   - Leaving stops renewal. Deleting the group stops renewal and revokes
     the group's VAC.
-  - Validity is a host/policy setting. Deleting a group
+  - Validity is a host/policy setting. The default is 30 days, renewed
+    when 10 days remain; sensitive groups go shorter. Deleting a group
   also revokes its VAC, and the reconciler of §9.3 owns those retries.
 - **Not authority at the VTC.** The group VMC is evidence for **others**:
   - a room admitting by presentation;
@@ -743,6 +764,13 @@ credential** to each of its members, just as a community room does.
 - **Groups.** The groups I am in, and open groups to join or request.
   Groups I manage get add/remove and bindings when I hold the grant.
 - **Lists.** Personal lists (VTA), across communities.
+
+**How the portal calls the VTC.** Directory and groups Trust Tasks are
+signed by the portal's sign-in browser key (`K_b`) as a key the member
+delegated, limited to those families, this community and the session. It
+works like the console key. A delegated signature never satisfies a task
+that needs the member's own DID. The mechanism is specified separately
+(§12.2).
 
 Stars, lists, petnames and notes reach the page through the wallet, as
 the Rooms pages do. When no wallet is present, those controls are hidden
@@ -936,7 +964,7 @@ declares `identifierScope: pairwise` where it can (introductions), and
 
 ## 13. Decisions and open questions
 
-Decided 2026-10-18: every community group has its own DID and issues group VMCs (§9.5). **Q1** member's VTA, **Q2** grant sets only, **Q3** `listed` with display name + role. Q4–Q7 follow the recommendation unless the specification review says otherwise.
+Decided 2026-10-18 (second round): `keys/sign-document` for issuance, a minimal `vtc-group` template, purposes defined in VTI, portal delegated signing, 30/10-day group VMC validity, dynamic-group opt-out, and C2/C4–C8 kept as drafted in tf #817/#815. Decided earlier: every community group has its own DID and issues group VMCs (§9.5). **Q1** member's VTA, **Q2** grant sets only, **Q3** `listed` with display name + role. Q4–Q7 follow the recommendation unless the specification review says otherwise.
 
 | # | Question | Recommendation |
 |---|---|---|
