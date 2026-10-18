@@ -536,6 +536,8 @@ A community group is a VTC record:
 ```jsonc
 {
   "groupId": "grp_…",
+  "groupDid": "did:webvh:…",       // minted by the community's VTA (§9.5)
+  "issuesCredentials": true,
   "name": "Working Group: Identity",
   "description": "…",
   "kind": "static",                 // static | dynamic
@@ -661,6 +663,49 @@ Or, by reference, a defined role's capability set:
   without deciding precedence between groups. That is open question
   **Q2**. The recommended answer is "groups confer grants only", leaving
   the community role a direct assignment.
+
+### 9.5 Group identity and credentials
+
+Every community group has **its own DID** and issues a **membership
+credential** to each of its members, just as a community room does.
+
+- **Minting.** `groups/create` asks the community's own VTA, over
+  `vta_link`, to mint the group's DID from a DID template (working name
+  `vtc-group`), exactly as a community room's DID is minted from the
+  `room` template. The VTC never holds a group key, and never falls back
+  to one (`noKeyHolder`).
+  - The group is recorded only after the mint has answered (remote
+    first).
+  - Serverless group DIDs are served at `/group-dids/<id>/did.jsonl`.
+  - The DID document carries no name or description, so resolving it
+    reveals nothing about the group.
+- **Authority to issue.** The community issues the group DID a VAC (DTG
+  `AuthorizationCredential`, community → group) that authorises it to
+  issue membership credentials. A verifier chains: member's group VMC →
+  group VAC → the community, recognised as usual.
+- **Membership credential.** A member who joins the group receives a VMC
+  issued by the group DID to their membership DID. Joining covers
+  `members/add`, an `open` join, a decided request and a dynamic
+  recompute. The VMC is
+  `["VerifiableCredential","DTGCredential","MembershipCredential"]`
+  and is delivered on the existing credential-exchange offer path.
+  `issuesCredentials` (default `true`) turns this off for a group that
+  doesn't need it.
+- **Revocation.** Leaving the group, leaving the community, or deleting
+  the group revokes the VMC on the group's status list. Deleting a group
+  also revokes its VAC, and the reconciler of §9.3 owns those retries.
+- **Not authority at the VTC.** The group VMC is evidence for **others**:
+  - a room admitting by presentation;
+  - a chat peer checking "is this person in the Identity WG";
+  - another community recognising the group.
+
+  The VTC's own gates never read it. They read the ACL entry, which §9.4
+  keeps in step (VTI-VTC-020). A VMC is portable, and its holder decides
+  where to present it. That is independent of `showMembers`, which only
+  governs what the VTC itself lists.
+- **Rooms.** With a group VMC, a group-bound room can admit by
+  presentation as well as by offer. That is a later option; §9.3's offers
+  remain the first implementation.
 
 ## 10. User interface
 
@@ -881,7 +926,7 @@ declares `identifierScope: pairwise` where it can (introductions), and
 
 ## 13. Decisions and open questions
 
-Decided 2026-10-18: **Q1** member's VTA, **Q2** grant sets only, **Q3** `listed` with display name + role. Q4–Q7 follow the recommendation unless the specification review says otherwise.
+Decided 2026-10-18: every community group has its own DID and issues group VMCs (§9.5). **Q1** member's VTA, **Q2** grant sets only, **Q3** `listed` with display name + role. Q4–Q7 follow the recommendation unless the specification review says otherwise.
 
 | # | Question | Recommendation |
 |---|---|---|
@@ -899,7 +944,7 @@ Decided 2026-10-18: **Q1** member's VTA, **Q2** grant sets only, **Q3** `listed`
 |---|---|---|
 | **P0** | Specs §12 (tf first; vti-spec DIR chapter + C.3) | — |
 | **P1** | Field schema, cards, listing/search, `entries/*`, `query/0.1` re-pointed, portal Directory + My card, console settings | P0 tf + trust-tasks-rs bump |
-| **P2** | Static community groups, managers, `groups/*`, room bindings + reconciler | P1 |
+| **P2** | Static community groups with their own DID + group VMCs (§9.5), managers, `groups/*`, room bindings + reconciler | P1; `vtc-group` DID template |
 | **P3** | Personal layer in the VTA (`persona/contact` minor), wallet channel, stars/lists/petnames/notes in the portal, VRC badges, introductions | P1; wallet release |
 | **P4** | Admin notes, export, `credential`-sourced fields (`card/present`) | P1 |
 | **P5** | Grant bindings (§9.4) with action-list consent | P2 |
