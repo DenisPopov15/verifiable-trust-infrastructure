@@ -692,13 +692,14 @@ credential** to each of its members, just as a community room does.
   doesn't need it.
 - **Revocation.** Leaving the group, leaving the community, or deleting
   the group revokes the VMC.
-  - **Open.** A status list per group breaks herd privacy (VTI-CRD-014):
-    a ten-member group's list singles its members out.
-  - The options are short-lived group VMCs renewed while the member
-    stays (expiry is the revocation, as room authority renewal does), or
-    entries on the community's large shared list.
-  - Recommendation: short-lived and renewed, because it needs no list
-    the issuer does not sign. Deleting a group
+  - **Decided: short-lived, renewed.** Group VMCs are short-lived and
+    the community's VTA renews them for as long as the member stays.
+    Expiry is the revocation, as room authority renewal works.
+  - There is no status list per group. A ten-member group's list would
+    single its members out (VTI-CRD-014).
+  - Leaving stops renewal. Deleting the group stops renewal and revokes
+    the group's VAC.
+  - Validity is a host/policy setting. Deleting a group
   also revokes its VAC, and the reconciler of §9.3 owns those retries.
 - **Not authority at the VTC.** The group VMC is evidence for **others**:
   - a room admitting by presentation;
