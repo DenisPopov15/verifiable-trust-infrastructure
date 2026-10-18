@@ -9,7 +9,6 @@ pub(crate) mod ceremonies;
 pub(crate) mod community;
 pub(crate) mod credential_exchange;
 pub(crate) mod did_log;
-pub(crate) mod directory;
 pub(crate) mod endorsement_types;
 pub(crate) mod endorsements;
 pub(crate) mod health;
@@ -145,6 +144,21 @@ use crate::server::AppState;
         vta_sdk::openapi::RoomsCommunityMembersRemove01Response,
         vta_sdk::openapi::RoomsCommunityMembersRemove02Payload,
         vta_sdk::openapi::RoomsCommunityMembersRemove02Response,
+        // The member directory the console administers (`trust_tasks::directory_tasks`).
+        vta_sdk::openapi::DirectoryFieldsList01Payload,
+        vta_sdk::openapi::DirectoryFieldsList01Response,
+        vta_sdk::openapi::DirectoryFieldsDefine01Payload,
+        vta_sdk::openapi::DirectoryFieldsDefine01Response,
+        vta_sdk::openapi::DirectoryFieldsUpdate01Payload,
+        vta_sdk::openapi::DirectoryFieldsUpdate01Response,
+        vta_sdk::openapi::DirectoryFieldsRetire01Payload,
+        vta_sdk::openapi::DirectoryFieldsRetire01Response,
+        vta_sdk::openapi::DirectoryCardAssert01Payload,
+        vta_sdk::openapi::DirectoryCardAssert01Response,
+        vta_sdk::openapi::DirectoryEntriesList01Payload,
+        vta_sdk::openapi::DirectoryEntriesList01Response,
+        vta_sdk::openapi::DirectoryEntriesShow01Payload,
+        vta_sdk::openapi::DirectoryEntriesShow01Response,
         vta_sdk::openapi::RoomsCommunityMembersList01Payload,
         vta_sdk::openapi::RoomsCommunityMembersList01Response,
         // Where rooms' files are kept (`trust_tasks::storage_tasks`), signed
@@ -185,7 +199,6 @@ use crate::server::AppState;
         // The community verbs the console signs (`trust_tasks::community_tasks`).
         community::profile::CommunityProfileResponse,
         ceremonies::CeremonyListResponse,
-        directory::DirectoryResponse,
         vti_common::pagination::Paginated<crate::endorsement_types::EndorsementType>,
         recognition_admin::RecognitionCheck,
         members::read::RemovedMembersResponse,
