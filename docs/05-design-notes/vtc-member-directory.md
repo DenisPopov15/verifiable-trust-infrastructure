@@ -370,8 +370,11 @@ Why:
     directory entry.
 
   Plus a small `lists` record (`listId`, name, colour, order).
-- **It works in every community at once.** "My mentors" can hold people
-  from two communities, and the VTC of neither learns it.
+- **It spans communities, within one VTA context.** "My mentors" can
+  hold people from two communities whose contacts the member keeps in the
+  same context, and the VTC of neither learns it. A list never spans VTA
+  contexts, because that would join what the context boundary keeps
+  apart (tf `persona/contact/lists/*`).
 - **Member-owned rooms.** A member who owns a room adds a personal list
   to it the same way a community adds a group (§9.3), because the
   member's VTA is that room's key holder.
