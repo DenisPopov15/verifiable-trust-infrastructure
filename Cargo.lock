@@ -10914,9 +10914,9 @@ dependencies = [
 
 [[package]]
 name = "trust-tasks-rs"
-version = "0.32.9"
+version = "0.32.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4004604d2cce586974ecc160fc88c86e069c9238e74c47641ed92e1e53ad3f9e"
+checksum = "7d9d31b810568e0ff763e349da11e8815059c6950d4ea5a67e2f4c73676f2d46"
 dependencies = [
  "async-trait",
  "chrono",
@@ -12248,6 +12248,7 @@ dependencies = [
  "vti-secrets",
  "vti-vetting-pcs",
  "vti-voting",
+ "vti-voting-service",
  "webauthn-rs",
  "webauthn-rs-proto",
  "wiremock",
@@ -12329,6 +12330,7 @@ dependencies = [
  "affinidi-messaging-test-mediator",
  "affinidi-secrets-resolver",
  "affinidi-tdk",
+ "axum",
  "base64 0.23.1",
  "chrono",
  "ed25519-dalek 3.0.0",
@@ -12343,9 +12345,12 @@ dependencies = [
  "trust-tasks-rs",
  "url",
  "uuid",
+ "vta-cli-common",
  "vta-sdk",
  "vta-service",
  "vti-common",
+ "vti-voting",
+ "vti-voting-service",
 ]
 
 [[package]]
