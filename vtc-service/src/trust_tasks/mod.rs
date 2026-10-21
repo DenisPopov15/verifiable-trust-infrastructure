@@ -681,6 +681,10 @@ async fn dispatch_trust_task_validated(
                         Err(e) => return app_error_to_reject(&doc, &e),
                     }
                 }
+                // A did:scid signer verified through its `src`: remember where,
+                // so the bare DID it is recorded by resolves after a restart
+                // (VTI-KEY-162).
+                crate::scid_sources::record_best_effort(&state.members_ks, &signer).await;
                 &ctx.with_verified_signer(Some(signer))
             }
             // A proof that is present and does not verify is always fatal,

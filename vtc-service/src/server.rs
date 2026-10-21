@@ -687,6 +687,16 @@ pub async fn run(
     )
     .await?;
 
+    // The did:scid identities verified here before resolve by their bare DID
+    // again, from the sources recorded when they were (VTI-KEY-162).
+    if let Some(resolver) = did_resolver.as_ref() {
+        match crate::scid_sources::seed(&members_ks, resolver).await {
+            Ok(0) => {}
+            Ok(n) => info!(seeded = n, "did:scid sources seeded from the store"),
+            Err(e) => warn!(error = %e, "did:scid sources not seeded"),
+        }
+    }
+
     // P0.7: `install` (ephemeral install-token signing key) and `passkey`
     // (WebAuthn state) also hold secrets in the clear. `init_auth` already
     // migrated + wrapped `audit_key`; do the same for these two here, where
