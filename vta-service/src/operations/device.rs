@@ -1332,6 +1332,8 @@ mod tests {
             "pcs-vetter",
             "pcs-applicant",
             "witness-request",
+            "pcs-voter",
+            "pcs-trustee",
         ] {
             assert!(
                 p.contains(&cap.to_string()),

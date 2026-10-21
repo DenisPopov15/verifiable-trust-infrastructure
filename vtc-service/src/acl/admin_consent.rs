@@ -278,6 +278,12 @@ pub enum Act {
     /// The subject names the purpose; the consent is pinned to the revision
     /// active for it now.
     ChangeRecognitionPolicy(crate::policy::PolicyPurpose),
+    /// **VTI-VOT-081** — creating a **binding** election
+    /// (`vtc/elections/create` with `manifest.binding`): its result decides
+    /// something in the community's name, so its creation is the agreement of
+    /// two holders of `vtc.elections.manage`. The subject is the election's
+    /// identifier; the consent is pinned to there being no election under it.
+    CreateBindingElection,
     /// **VTI-DIR-104** — conferring authority through a group: binding an
     /// authority-conferring capability to a group (`vtc/groups/bindings/add`,
     /// subject `group:<groupId>`), or adding a member to a group carrying one
@@ -321,6 +327,7 @@ impl Act {
             Self::ChangeStorage => "the storage tasks' consent",
             Self::ChangeTrustedWitnesses => "VTI-CMP-090",
             Self::ChangeDirectoryPrivacy => "VTI-DIR-024",
+            Self::CreateBindingElection => "VTI-VOT-081",
             Self::ChangeJoinCriteria
             | Self::ChangeHiddenVetting
             | Self::ChangeRecognitionPolicy(_) => "VTI-APV-023",
@@ -407,6 +414,7 @@ impl Act {
             Self::ChangeJoinCriteria => vec![CapRef::all(Capability::SurfaceAdmin)],
             Self::ChangeHiddenVetting => vec![CapRef::all(Capability::VettingManage)],
             Self::ChangeDirectoryPrivacy => vec![CapRef::all(Capability::DirectoryAdmin)],
+            Self::CreateBindingElection => vec![CapRef::all(Capability::ElectionsManage)],
             Self::ChangeRecognitionPolicy(purpose) => vec![CapRef::new(
                 Capability::PolicyAdmin,
                 Some(ResourceQualifier::Policy(purpose)),
@@ -463,6 +471,7 @@ impl Act {
             Self::ChangeJoinCriteria => s::KIND_CRITERIA_CHANGE,
             Self::ChangeHiddenVetting => s::KIND_HIDDEN_VETTING_CHANGE,
             Self::ChangeDirectoryPrivacy => s::KIND_DIRECTORY_FIELD_WIDEN,
+            Self::CreateBindingElection => s::KIND_ELECTION_BINDING_CREATE,
             Self::ChangeRecognitionPolicy(_) => s::KIND_POLICY_RECOGNITION,
             Self::GroupAuthority => s::KIND_GRANT_AUTHORITY,
             Self::ReduceGroupAuthority => s::KIND_REDUCE_AUTHORITY,
@@ -1670,6 +1679,7 @@ pub(crate) fn requester_still_authorized(
         Act::ChangeJoinCriteria => entry.admin.can(Capability::SurfaceAdmin, None),
         Act::ChangeHiddenVetting => entry.admin.can(Capability::VettingManage, None),
         Act::ChangeDirectoryPrivacy => entry.admin.can(Capability::DirectoryAdmin, None),
+        Act::CreateBindingElection => entry.admin.can(Capability::ElectionsManage, None),
         Act::ChangeRecognitionPolicy(p) => entry
             .admin
             .can(Capability::PolicyAdmin, Some(&ResourceQualifier::Policy(p))),
@@ -1764,6 +1774,13 @@ pub(crate) async fn pin_for(
         // The approvers were shown a change from *this* definition. Any write to
         // the field in the meantime — a narrowing, another widening — voids the
         // action. `updatedAt` is when, not what, and is left out.
+        // The approvers were shown a new election under this identifier. One
+        // created under it meanwhile means the creation they agreed to would not run.
+        Act::CreateBindingElection => json!(
+            crate::elections::store::get(state.elections.ks(), subject)
+                .await?
+                .map(|r| r.manifest_digest)
+        ),
         Act::ChangeDirectoryPrivacy => {
             let mut f = crate::directory::fields::get(state.directory.ks(), subject).await?;
             if let Some(f) = f.as_mut() {
@@ -1936,6 +1953,7 @@ mod tests {
             Act::ChangeJoinCriteria,
             Act::ChangeHiddenVetting,
             Act::ChangeDirectoryPrivacy,
+            Act::CreateBindingElection,
             Act::ChangeRecognitionPolicy(PolicyPurpose::Personhood),
             Act::GroupAuthority,
             Act::ReduceGroupAuthority,
@@ -2021,6 +2039,10 @@ mod tests {
             (
                 Act::ChangeDirectoryPrivacy,
                 crate::trust_tasks::directory_tasks::FIELDS_UPDATE_TYPE,
+            ),
+            (
+                Act::CreateBindingElection,
+                crate::admin_actions::summary::ELECTIONS_CREATE,
             ),
             (
                 Act::ChangeHiddenVetting,

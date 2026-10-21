@@ -93,6 +93,12 @@ pub enum Capability {
     /// Not conferring: it decides what the directory may disclose, never who
     /// holds authority.
     DirectoryAdmin,
+    /// The community's polls, surveys and elections (`vtc/elections/*`):
+    /// create, close, cancel and certify them, and read every one with its
+    /// issued-ticket count (VTI-VOT-080). Not conferring: a binding election's
+    /// creation takes a second holder's consent (VTI-VOT-081), and a certified
+    /// result authorizes nothing by itself.
+    ElectionsManage,
     /// Administrators' notes about members (`vtc/directory/notes/*`,
     /// VTI-DIR-030 – 033): writing them, reading them, and exporting a
     /// member's notes to answer their request for the data held about them.
@@ -116,7 +122,7 @@ pub enum Capability {
 
 impl Capability {
     /// Every capability, in registry order.
-    pub const ALL: [Capability; 25] = [
+    pub const ALL: [Capability; 26] = [
         Capability::RolesAssign,
         Capability::ApprovalsAdmin,
         Capability::PolicyAdmin,
@@ -137,6 +143,7 @@ impl Capability {
         Capability::RoomsAdmin,
         Capability::RoomsManage,
         Capability::DirectoryAdmin,
+        Capability::ElectionsManage,
         Capability::DirectoryNotes,
         Capability::GroupsManage,
         Capability::GitNsAdmin,
@@ -167,6 +174,7 @@ impl Capability {
             Capability::RoomsAdmin => "vtc.rooms.admin",
             Capability::RoomsManage => "vtc.rooms.manage",
             Capability::DirectoryAdmin => "vtc.directory.admin",
+            Capability::ElectionsManage => "vtc.elections.manage",
             Capability::DirectoryNotes => "vtc.directory.notes",
             Capability::GroupsManage => "vtc.groups.manage",
             Capability::GitNsAdmin => "git.ns.admin",

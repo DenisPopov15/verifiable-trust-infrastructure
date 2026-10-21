@@ -15,6 +15,7 @@ import {
   BadgeCheck,
   BookUser,
   ClipboardList,
+  Vote,
   DoorOpen,
   FolderGit2,
   Inbox,
@@ -45,6 +46,7 @@ import { ConsoleKeys } from "@/plugins/consoleKeys";
 import { Dashboard } from "@/plugins/dashboard";
 import { DATA_ROOMS_CAPABILITIES, DataRooms } from "@/plugins/dataRooms";
 import { Directory } from "@/plugins/directory";
+import { Elections } from "@/plugins/elections";
 import { Groups } from "@/plugins/groups";
 import { Invitations } from "@/plugins/invitations";
 import { JoinRequests } from "@/plugins/joinRequests";
@@ -128,6 +130,18 @@ export function registerBuiltinPlugins(): void {
     path: "/directory",
     iconComponent: BookUser,
     reactComponent: Directory,
+  });
+
+  // The community's polls, surveys and elections (docs/03-vtc/elections.md):
+  // create, close, cancel and certify them. Members vote through their own VTA.
+  registerPlugin({
+    id: "elections",
+    group: "governance",
+    label: "Elections",
+    path: "/elections",
+    iconComponent: Vote,
+    reactComponent: Elections,
+    capabilities: ["vtc.elections.manage"],
   });
 
   // The community's groups: every administrator reads them; holders of

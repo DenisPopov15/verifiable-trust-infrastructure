@@ -194,4 +194,150 @@ impl VtaClient {
         )
         .await
     }
+
+    /// `vta/pcs/voter/register/0.1` — this election's voter key and the blinded ticket request
+    /// to carry to `vtc/elections/tickets/issue`.
+    pub async fn pcs_voter_register(
+        &self,
+        req: &pcs::voter::register::v0_1::Payload,
+    ) -> Result<pcs::voter::register::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_VOTER_REGISTER_0_1,
+            req,
+            PCS_TT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `vta/pcs/voter/read/0.1` — `vtc/elections/list` or `show`, signed as the member, to send
+    /// to the community unchanged.
+    pub async fn pcs_voter_read(
+        &self,
+        req: &pcs::voter::read::v0_1::Payload,
+    ) -> Result<pcs::voter::read::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_VOTER_READ_0_1,
+            req,
+            PCS_TT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `vta/pcs/voter/accept/0.1` — unblind the community's answer into the ticket.
+    pub async fn pcs_voter_accept(
+        &self,
+        req: &pcs::voter::accept::v0_1::Payload,
+    ) -> Result<pcs::voter::accept::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_VOTER_ACCEPT_0_1,
+            req,
+            PCS_TT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `vta/pcs/vote/0.1` — the signed cast document. Send it to the ballot box yourself, from
+    /// your own connection, and resend that same document if the answer is lost.
+    pub async fn pcs_vote(
+        &self,
+        req: &pcs::vote::v0_1::Payload,
+    ) -> Result<pcs::vote::v0_1::Response, VtaError> {
+        self.pcs_call(trust_tasks::TASK_VTA_PCS_VOTE_0_1, req, PCS_PROOF_TIMEOUT)
+            .await
+    }
+
+    /// `vta/pcs/voter/receipt/0.1` — keep a receipt, and check its inclusion in a head the
+    /// community kept.
+    pub async fn pcs_voter_receipt(
+        &self,
+        req: &pcs::voter::receipt::v0_1::Payload,
+    ) -> Result<pcs::voter::receipt::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_VOTER_RECEIPT_0_1,
+            req,
+            PCS_TT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `vta/pcs/vote-encrypted/0.1` — the signed `voting/ballot/cast-encrypted` document for a
+    /// sealed or tallied-encrypted election, under the election key `voting/trustees/status`
+    /// reports. Send it as [`Self::pcs_vote`]'s.
+    pub async fn pcs_vote_encrypted(
+        &self,
+        req: &pcs::vote_encrypted::v0_1::Payload,
+    ) -> Result<pcs::vote_encrypted::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_VOTE_ENCRYPTED_0_1,
+            req,
+            PCS_PROOF_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `vta/pcs/trustee/enrol/0.1` — the trustee's transport key, and its signed enrolment.
+    pub async fn pcs_trustee_enrol(
+        &self,
+        req: &pcs::trustee::enrol::v0_1::Payload,
+    ) -> Result<pcs::trustee::enrol::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_TRUSTEE_ENROL_0_1,
+            req,
+            PCS_TT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `vta/pcs/trustee/deal/0.1` — the trustee's dealing, signed.
+    pub async fn pcs_trustee_deal(
+        &self,
+        req: &pcs::trustee::deal::v0_1::Payload,
+    ) -> Result<pcs::trustee::deal::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_TRUSTEE_DEAL_0_1,
+            req,
+            PCS_TT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `vta/pcs/trustee/keys/0.1` — check the shares dealt and confirm; with the formed election
+    /// key, keep the trustee's share of it.
+    pub async fn pcs_trustee_keys(
+        &self,
+        req: &pcs::trustee::keys::v0_1::Payload,
+    ) -> Result<pcs::trustee::keys::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_TRUSTEE_KEYS_0_1,
+            req,
+            PCS_TT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `vta/pcs/trustee/justify/0.1` — answer a complaint with the share that was dealt.
+    pub async fn pcs_trustee_justify(
+        &self,
+        req: &pcs::trustee::justify::v0_1::Payload,
+    ) -> Result<pcs::trustee::justify::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_TRUSTEE_JUSTIFY_0_1,
+            req,
+            PCS_TT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `vta/pcs/trustee/decrypt/0.1` — the trustee's partial decryptions, signed.
+    pub async fn pcs_trustee_decrypt(
+        &self,
+        req: &pcs::trustee::decrypt::v0_1::Payload,
+    ) -> Result<pcs::trustee::decrypt::v0_1::Response, VtaError> {
+        self.pcs_call(
+            trust_tasks::TASK_VTA_PCS_TRUSTEE_DECRYPT_0_1,
+            req,
+            PCS_PROOF_TIMEOUT,
+        )
+        .await
+    }
 }

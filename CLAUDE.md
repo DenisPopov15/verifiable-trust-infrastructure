@@ -49,6 +49,8 @@ Layer 1 (VTA foundations):
   vta-keyspaces   → vti-common
   vta-config      → vti-common, vti-secrets
   vti-vetting-pcs → vta-sdk   (hidden vetting: community + member engines)
+  vti-voting      → vti-vetting-pcs   (community voting: tickets, casts, ballot box)
+  vti-voting-service → vti-voting, vti-common, vta-sdk   (the voting host service)
   vta-audit       → vta-sdk, vti-common
 
 Layer 2 (VTA subsystems):
@@ -79,7 +81,7 @@ Layer 4 (the spine + consumers):
 
 | Crate | Role |
 |---|---|
-| `vti-common` | Shared foundation: JWT auth, ACL, `Store`/`KeyspaceHandle` enum (local fjall + vsock), `AppError`, config types, identifier validation (`identifier.rs`), `secure_file` (owner-only file hardening), pluggable telemetry sink (`telemetry::TelemetrySink`, default ring buffer), the `SeedStore` trait, `guards` (executor preconditions) |
+| `vti-common` | Shared foundation: `host_session` (feature `host-session`: a host service identity's mediator session, supervisor and TSP/DIDComm carriage behind a `Responder` — the witness and the ballot box), JWT auth, ACL, `Store`/`KeyspaceHandle` enum (local fjall + vsock), `AppError`, config types, identifier validation (`identifier.rs`), `secure_file` (owner-only file hardening), pluggable telemetry sink (`telemetry::TelemetrySink`, default ring buffer), the `SeedStore` trait, `guards` (executor preconditions) |
 | `vta-sdk` | Public SDK: types, REST + DIDComm client, `sealed_transfer`, `did_templates`, `provision_integration`, attestation verification, `protocol` (DIDComm protocol-management types) |
 | `vti-secrets` | Shared secret-store backends (AWS / GCP / Azure / Vault / Kubernetes / keyring / config-seed / TEE-KMS / plaintext) + the `create_seed_store(&secrets, &data_dir)` factory + `SecretsConfig`, all behind the same feature flags. Plus (feature `onboarding`) `IntegrationOnboarding` — the ephemeral-`did:key` → ACL-grant → auto-rotate cold-start helper. Lets external VTI integrations onboard + store secrets exactly like first-party ones without depending on `vta-service`. The backend implementations are shared by **both** the VTA (`vta-keys::seed_store`) and the VTC (`vtc-service::keys::seed_store`, which keeps its own factory for VTC-specific storage locations / `*SecretStore` naming) |
 | `vta-keyspaces` | Keyspace-name registry — the `const` names every `store.keyspace(..)` call uses, plus the backup partition (`ALL` / `BACKED_UP` / `EXCLUDED_FROM_BACKUP`, pinned by a census test). Dependency-free leaf |
@@ -89,6 +91,8 @@ Layer 4 (the spine + consumers):
 | `vta-keys` | **Key management**: master-seed storage, BIP-32 hierarchical derivation, key wrapping (AES-GCM), imported-key handling, `create_seed_store` backend selection, `derive_pre_rotation_keys` |
 | `vta-vault` | **Holder credential vault**: storage, query, receive/verify, present, status refresh, and the archival lifecycle (`VaultStatus {Active,Archived,Deleted}`) |
 | `vti-vetting-pcs` | **Hidden vetting** on the Predicate Credential System: the community's `issuer` and `verifier` (`vtc-service`, feature `vetting-pcs`) and the member-side `vetter` / `applicant` engines the VTA runs as its principal's PCS engine (`vta/pcs/*`). Feature `harness`: an in-process community (`vtc::Vtc`) for end-to-end tests. Docs: `docs/02-vta/pcs-engine.md` |
+| `vti-voting` | **Community voting** (VTI-VOT-001 – 100; published, as `vta-service` runs its voter role). The PCS core: `registrar` (voting helper key under its own deployment label, tickets under `voter/<election>`), `voter` (fresh key per election, blind ticket request, `cast_wire` = `attest_in_context` for the election point over the ballot's JCS bytes), `ballot_box` (verifies on the published `hvk` alone; the tag is the per-election nullifier). `board` (RFC 9162 log, inclusion/consistency proofs), `rules` + `tally` over the generated `voting/*` types, and `service::BallotBox` — every `voting/*` task as a state machine with a `Journal` (rebuilt by replaying the board). `audit` re-verifies a whole board from the published key alone (certification, any auditor). `trustees`: the sealed and tallied-encrypted levels' cryptography on Ristretto (`curve25519-dalek`) — dealer-free t-of-n key generation (Feldman + proof of knowledge), Chaum–Pedersen-proven partial decryptions, sealed ballots (ElGamal KEM + ChaCha20-Poly1305), and exponential-ElGamal ballots with 0/1 and selection-count proofs; scalars from bytes, never its `rand_core` (PCS pins rand 0.8). Unaudited protocol code over audited group operations. Wire types: `trust_tasks_rs::specs::voting` (0.32.3+). Benchmark: `examples/scale.rs` |
+| `vti-voting-service` | **The voting service** (`publish = false`): a host service holding ballot boxes for any number of communities, never a roster. Its identity is a `did:webvh` its operator's VTA mints from the `ballot-box` template (`vti-voting-service setup`, two-phase like the witness; keys in `[secrets]`). Communities and auditors reach it over **TSP, then DIDComm** through its own mediator session (`vti_common::host_session`; the transport-proven sender must be the document's issuer). **HTTPS** (`POST /trust-tasks`, advertised `TrustTaskHTTPS`) stays only as the sessionless cast door VTI-VOT-004 requires: a one-time key has no mediator session to take a receipt on, and opening one would hand the mediator the voter's address and timing. One dispatcher (`dispatch::answer`) behind both; every answer signed as its DID (receipts and heads are evidence); a file journal (`sync_data` before answering). Without `[identity]` it runs as a test `did:key` over HTTPS only |
 | `vta-external` | **External accounts** (`external/*`): identities the VTA holds at clouds and third-party services — account store (`external_accounts`; secrets in `external_secrets`, excluded from backup), the `ExternalAuthDriver` trait and drivers (`s3-static-presign` first), scope and binding checks, the per-binding rate. Design: `docs/05-design-notes/vta-external-accounts.md` |
 | `vta-webvh` | WebVH hosting infrastructure for the `did:webvh` lifecycle and its other consumers |
 | `vta-policy` | Policy subsystem: the regorus (Rego) engine + default bundle, the DTTE consent model, decision evaluators, policy storage |
@@ -1229,7 +1233,7 @@ new flow, update both this section and the relevant `docs/*.md`.
   REST `/did-templates` (global) or `/contexts/{id}/did-templates` (scoped).
 - **Built-ins** (`vta_sdk::did_templates::BUILTIN_NAMES`, shipped with
   the SDK, always available): `ai-agent`, `ai-agent-peer`,
-  `did-host-didcomm`, `did-host-http`, `did-host-http-didcomm`,
+  `ballot-box`, `did-host-didcomm`, `did-host-http`, `did-host-http-didcomm`,
   `did-host-http-tsp`, `did-host-tsp`, `didcomm-mediator`,
   `dtg-witness`, `push-gateway`, `swiyu-verifier`, `vta-admin`, `vtc-group`, `vtc-host`. The `did-host-*` names encode
   the DID-document **shape** (`http` = WebVHHosting, `didcomm` =
@@ -1840,6 +1844,32 @@ new flow, update both this section and the relevant `docs/*.md`.
 - **Docs**: `docs/03-vtc/trust-registry.md` (*Capability modules*),
   `../design-docs/vtc-capability-modules.md`.
 
+### VTC community elections (`vtc/elections/*`, feature `voting`)
+- **What**: The community as **registrar** of its polls, surveys and elections
+  (VTI-VOT-001 – 100): create from a manifest, list/show, close, cancel, and issue each party
+  the roll admits one ticket, blind. The ballot box is a `vti-voting-service`, never the VTC.
+- **Invariants to preserve**: the community never handles a ballot, and the ballot box never
+  learns who holds a ticket — nothing here may carry one to the other. The ballot box is
+  reached over TSP > DIDComm as the community (`elections::link`, `PeerTasks`), never HTTPS
+  (VTI-VOT-005). Remote first: `registered` / `closed` / `cancelled` only after the ballot box
+  answered; a registration it has not answered is redelivered by `elections::sweeper`, the one
+  retry owner; cancel stops issuance durably **before** it asks. Tickets: one per party per
+  election, recorded before answering, one critical section (`Elections::issue_lock`); the
+  audit row never carries the request's identifier, commitment or pre-credential. Unknown and
+  unseen are the same `electionUnknown`. A binding election parks as
+  `Act::CreateBindingElection` (VTI-VOT-081). The voting key is HKDF from the signer's master
+  (`vtc-voting-pcs-secret/v1`), unrelated to hidden vetting's. The trusted ballot boxes are
+  host config (`[voting] trusted_ballot_boxes`, VTI-VOT-082). `certify` reads everything from
+  the ballot box, never the requester, and re-verifies the board from the community's own key
+  (`vti_voting::audit`); auditors' attestations are evidence beside it, never instead. A trustee
+  step counts only as a `trusteeStep` entry carrying the trustee's signed request as received,
+  its proof verified by the reader (`vti_voting::steps::ProvenRequests`, CONVENTIONS §9.6); the
+  election key `show` carries is formed by the community from those steps alone, never taken
+  from `voting/trustees/status`, which carries no proof.
+- **Code**: `vtc-service/src/elections/`, `vtc-service/src/trust_tasks/election_tasks.rs`,
+  `vtc-service/tests/it/election_tasks.rs`.
+- **Docs**: `docs/03-vtc/elections.md`.
+
 ## Runtime guards to preserve
 
 These are load-bearing — know they exist before adjusting nearby code.
@@ -1976,19 +2006,19 @@ feature, so the default-feature reproduction the report printed never touched
 it. A dependency break of this shape is fixed upstream or by a raised floor,
 never by a change here.
 
-**26 of 35 crates publish.** The nine that do not — `vta-enclave`,
+**27 of 37 crates publish.** The ten that do not — `vta-enclave`,
 `vta-mcp`, `vta-mobile-core`, `didcomm-test`, `vti-fuzz`, `vti-e2e-tests`,
-`room-host`, `vti-rooms-wasm`, `vti-witness` — set `publish = false` in their
+`room-host`, `vti-rooms-wasm`, `vti-witness`, `vti-voting-service` — set `publish = false` in their
 own manifest, each with a comment saying why. (The count is the workspace's
 members plus `vti-fuzz`; the excluded `deploy/nitro/enclave-proxy` is a
 deployment helper, not counted.)
 
-The other 26 are `vta-sdk`, `vti-common`, `vti-secrets`, `vta-cli-common`,
+The other 27 are `vta-sdk`, `vti-common`, `vti-secrets`, `vta-cli-common`,
 `vtc-client`, `pnm-cli`, `cnm-cli`, `vtc-service` — plus `vta-service` and its
 closure (`vta-audit`, `vta-backup`, `vta-config`, `vta-keys`, `vta-keyspaces`,
 `vta-policy`, `vta-support`, `vta-sweepers`, `vta-tee`, `vta-vault`,
 `vta-webvh`, `vta-persona`, `vti-webauthn`, `vta-external`, `vti-vetting-pcs`,
-`vti-rooms`, `vti-rooms-dtg`).
+`vti-voting`, `vti-rooms`, `vti-rooms-dtg`).
 
 **`vtc-service` is published as a binary**, so an operator installs the VTC
 with `cargo install vtc-service`; nothing consumes its library, so it carries

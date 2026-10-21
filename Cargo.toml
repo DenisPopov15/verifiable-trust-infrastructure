@@ -40,6 +40,12 @@ members = [
   # Hidden-vetter admission (ZKP), development branch `zkp-pcs`: `publish = false`,
   # reached only from `vtc-service`'s off-by-default `vetting-pcs` feature.
   "vti-vetting-pcs",
+  # Community voting on PCS (design: community voting, draft VTI-VOT-*):
+  # `publish = false` until its first published consumer, not a default member.
+  "vti-voting",
+  # The voting service binary (a ballot box host service): `publish = false`,
+  # not a default member.
+  "vti-voting-service",
 ]
 # `vta-mobile-core` is a UniFFI client crate that cross-compiles to Android/iOS.
 # Keep it out of `default-members` so a bare `cargo build`/`test` for the server
@@ -674,6 +680,14 @@ aws-smithy-types = ">=1.6.1, <1.9"
 # `rooms/owner/group/add/0.3` and `rooms/owner/group/renew/0.2`, which settle a
 # pending removal like remove 0.3 (`earlierRemovalRefused`, `hostUnreachable`'s
 # `stage`; trust-tasks-tf #824).
+# 0.32.3: community voting — `voting/*`, `vtc/elections/*`, `vta/pcs/voter/*`
+# and `vta/pcs/vote` (trust-tasks-tf #834), and the `pcsVoter` capability
+# (appended, #835). 0.32.4: `pcs-voter` in device/_shared 0.1 too (#836).
+# 0.32.7: the encrypted levels — `voting/trustees/*`, `voting/ballot/cast-encrypted`,
+# `vta/pcs/{trustee/*,vote-encrypted}` and `pcsTrustee` (#845, #847). 0.32.8:
+# trustees read their ceremony on any board; `vtc/elections/show` carries the
+# election key (#852). 0.32.9: each trustee step on the board is the trustee's
+# signed request, `trusteeStep` (#853).
 # 0.32.3: the `vtc/groups/*` family — create, update, delete, list, show,
 # members/{add,remove,list}, join, leave, requests/{list,decide} and
 # managers/{add,remove} (trust-tasks-tf #831, #833).
@@ -682,7 +696,7 @@ aws-smithy-types = ">=1.6.1, <1.9"
 # `kindNotServed` (trust-tasks-tf #843).
 # 0.32.8: vtc/config/did-hosting/list/0.1 (trust-tasks-tf #849) — the VTA's
 # hosting servers the console offers for `dids.webvh_server`.
-trust-tasks-rs = { version = "0.32.8", default-features = false, features = [
+trust-tasks-rs = { version = "0.32.9", default-features = false, features = [
   "validate",
   "all-specs",
 ] }

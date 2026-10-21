@@ -2488,6 +2488,59 @@ pub const TASK_VTA_PCS_ATTEST_0_1: &str =
 pub const TASK_VTA_PCS_VETTER_SHOW_0_1: &str =
     <trust_tasks_rs::specs::vta::pcs::vetter::show::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
 
+// ─── Voter role of the PCS engine (trust-tasks-tf #834, VTI-VOT-020 – 053) ──
+// The VTA holds a voter key per election, unblinds the community's ticket and
+// builds the cast; the client sends the cast itself, from its own connection.
+
+/// `vta/pcs/voter/register/0.1` — this election's voter key and the blinded ticket request.
+pub const TASK_VTA_PCS_VOTER_REGISTER_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::voter::register::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+/// `vta/pcs/voter/read/0.1` — `vtc/elections/list` or `show`, signed as the member.
+pub const TASK_VTA_PCS_VOTER_READ_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::voter::read::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+/// `vta/pcs/voter/accept/0.1` — unblind the community's answer into the ticket.
+pub const TASK_VTA_PCS_VOTER_ACCEPT_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::voter::accept::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+/// `vta/pcs/vote/0.1` — validate a ballot and build the signed cast document.
+pub const TASK_VTA_PCS_VOTE_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::vote::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+/// `vta/pcs/voter/receipt/0.1` — keep a cast's receipt and check its inclusion.
+pub const TASK_VTA_PCS_VOTER_RECEIPT_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::voter::receipt::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+// ─── The encrypted levels (trust-tasks-tf #845, VTI-VOT-060 – 064) ──────────
+// The voter's sealed or tallied-encrypted cast, and the trustee role: the VTA
+// holds a trustee's transport key and key share and signs the trustee's
+// documents to the ballot box; the client carries them.
+
+/// `vta/pcs/vote-encrypted/0.1` — a sealed or tallied-encrypted cast document.
+pub const TASK_VTA_PCS_VOTE_ENCRYPTED_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::vote_encrypted::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+/// `vta/pcs/trustee/enrol/0.1` — the trustee's transport key and its enrolment, signed as it.
+pub const TASK_VTA_PCS_TRUSTEE_ENROL_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::trustee::enrol::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+/// `vta/pcs/trustee/deal/0.1` — the trustee's dealing, signed as it.
+pub const TASK_VTA_PCS_TRUSTEE_DEAL_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::trustee::deal::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+/// `vta/pcs/trustee/keys/0.1` — check the shares dealt, confirm, and keep the key share.
+pub const TASK_VTA_PCS_TRUSTEE_KEYS_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::trustee::keys::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+/// `vta/pcs/trustee/justify/0.1` — answer a complaint with the share that was dealt.
+pub const TASK_VTA_PCS_TRUSTEE_JUSTIFY_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::trustee::justify::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
+/// `vta/pcs/trustee/decrypt/0.1` — the trustee's partial decryptions, signed as it.
+pub const TASK_VTA_PCS_TRUSTEE_DECRYPT_0_1: &str =
+    <trust_tasks_rs::specs::vta::pcs::trustee::decrypt::v0_1::Payload as trust_tasks_rs::Payload>::TYPE_URI;
+
 // ─── Witnessed party (`vta/witness/*/0.2`, trust-tasks-tf #779, #799) ──────
 // The VTA is the participating party of a `witness/session` for its principal:
 // it builds and signs every document as the relationship DID, and verifies and
@@ -2819,6 +2872,17 @@ pub const ALL_URIS: &[&str] = &[
     TASK_VTA_PCS_TOKENS_ABANDON_0_1,
     TASK_VTA_PCS_ATTEST_0_1,
     TASK_VTA_PCS_VETTER_SHOW_0_1,
+    TASK_VTA_PCS_VOTER_REGISTER_0_1,
+    TASK_VTA_PCS_VOTER_READ_0_1,
+    TASK_VTA_PCS_VOTER_ACCEPT_0_1,
+    TASK_VTA_PCS_VOTE_0_1,
+    TASK_VTA_PCS_VOTER_RECEIPT_0_1,
+    TASK_VTA_PCS_VOTE_ENCRYPTED_0_1,
+    TASK_VTA_PCS_TRUSTEE_ENROL_0_1,
+    TASK_VTA_PCS_TRUSTEE_DEAL_0_1,
+    TASK_VTA_PCS_TRUSTEE_KEYS_0_1,
+    TASK_VTA_PCS_TRUSTEE_JUSTIFY_0_1,
+    TASK_VTA_PCS_TRUSTEE_DECRYPT_0_1,
     TASK_VTA_WITNESS_OPEN_0_2,
     TASK_VTA_WITNESS_PRESENT_0_2,
     TASK_VTA_WITNESS_ACCEPT_0_2,

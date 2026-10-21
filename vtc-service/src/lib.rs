@@ -32,6 +32,7 @@ pub mod did_key;
 pub mod did_log_install;
 pub mod did_self_check;
 pub mod directory;
+pub mod elections;
 #[cfg(feature = "setup")]
 pub mod emergency;
 pub mod endorsement_types;

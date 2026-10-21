@@ -69,8 +69,10 @@ naming another member DID is refused `memberMismatch`.
 |---|---|---|
 | `pcs-vetter` (`pcsVetter`) | `root-request`, `root-accept`, `tokens/*`, `attest`, `vetter/show` | `admin`, `initiator` |
 | `pcs-applicant` (`pcsApplicant`) | `applications/*`, `verify-attestation`, `prove` | `admin`, `initiator` |
+| `pcs-voter` (`pcsVoter`) | `voter/register`, `voter/read`, `voter/accept`, `vote`, `vote-encrypted`, `voter/receipt` | `admin`, `initiator` |
+| `pcs-trustee` (`pcsTrustee`) | `trustee/enrol`, `trustee/deal`, `trustee/keys`, `trustee/justify`, `trustee/decrypt` | `admin`, `initiator` |
 
-Neither is `sign`, and `sign` confers neither (VTI-VTA-007). `application`
+None is `sign`, and `sign` confers none (VTI-VTA-007). `application`
 derives neither: an agent vets or applies for its principal only when granted the
 capability by name. Every task is also gated on the context: a vetter task, and
 `applications/create`, name it; an application handle in a context the caller
@@ -83,6 +85,62 @@ type URI ([Approvals](approvals.md)):
 ```sh
 pnm approvals require https://trusttasks.org/spec/vta/pcs/attest/0.1 --reauth
 ```
+
+## The voter's round
+
+The same engine votes in a community's elections (community voting, VTI-VOT-020 –
+053; conventions `voting/_shared/0.1/CONVENTIONS.md`):
+
+| Step | Who | Task |
+|---|---|---|
+| 0 | client → VTA → community | `vta/pcs/voter/read` — `vtc/elections/list` or `show` signed as the member (a persona this VTA holds), sent to the community unchanged: the manifest, parameters and disclosure the next steps need. The VTA signs only those two reads |
+| 1 | client → VTA | `vta/pcs/voter/register` — a fresh key for this election and the blinded ticket request; a repeat before the ticket is held answers with the same request. With `member` (a persona this VTA holds), also `ticketDocument`: the request to the community already signed as that member, kept and returned unchanged on a repeat |
+| 2 | client → community | `vtc/elections/tickets/issue` — `ticketDocument` as it came (or the request signed by a member DID the client holds); the community signs the ticket blind, one per eligible member |
+| 3 | client → VTA | `vta/pcs/voter/accept` — unblinded and kept wrapped |
+| 4 | client → VTA | `vta/pcs/vote` — the ballot checked against the manifest, the cast built, and the `voting/ballot/cast` document returned **signed by a key made for that cast alone** and never kept |
+| 5 | client → ballot box | the cast document, from the client's own connection, after a pause; resent unchanged if the answer is lost |
+| 6 | client → VTA | `vta/pcs/voter/receipt` — the ballot box's signed receipt kept, and checked for inclusion in a head the community kept |
+
+A voter key is per election, so a key recovered later links one election, never a
+member's voting history. The cast never carries the member's DID (VTI-VOT-003), and
+audit names the election, never a tag, a cast or a receipt (VTI-VOT-100). An MCP
+host confirms every `vote` (`vta-mcp`'s guard counts it destructive).
+
+In a **sealed** or **tallied-encrypted** election (VTI-VOT-060 – 064, conventions §9) step 4
+is `vta/pcs/vote-encrypted`, given the election key `vtc/elections/show` carries — the key the
+community formed itself from the trustees' signed steps on the board, never one the ballot box
+merely reports: the ballot is sealed to that key whole, or encrypted option
+by option with proofs that each is 0 or 1 and the question's count is one the manifest admits.
+The attestation is made over the encrypted form, and the cleartext ballot never leaves the VTA.
+`vta/pcs/vote` refuses such a manifest. The receipt is checked the same way.
+
+## The trustee's round
+
+A trustee of a sealed or tallied-encrypted election holds a transport key and a share of the
+election key; any `threshold` of the trustees decrypt the result after close, and fewer cannot.
+The VTA is the custodian of both, and signs each `voting/trustees/*` request as the trustee — a
+persona it holds, named in the manifest's `trustees.dids`. The client carries the documents to
+the ballot box (TSP or DIDComm; HTTPS where it has no session):
+
+| Step | VTA task | Then, to the ballot box |
+|---|---|---|
+| 1 | `vta/pcs/trustee/enrol` — the transport key, made on first use from a fresh path under the context's base | `voting/trustees/enrol` |
+| 2 | `vta/pcs/trustee/deal`, with every trustee's transport key — the polynomial's commitments and each trustee's share sealed to its transport key | `voting/trustees/deal` |
+| 3 | `vta/pcs/trustee/keys`, with every dealing — each share dealt to this trustee opened and checked; the dealers whose shares fail are the complaints | `voting/trustees/confirm` |
+| 4 | `vta/pcs/trustee/justify`, if complained of — the share dealt to the complainant, in the clear | `voting/trustees/justify` |
+| 5 | `vta/pcs/trustee/keys` again, with the formed `electionKey` — the trustee's share computed, checked against its published verification key, and kept | — |
+| 6 | after close, `vta/pcs/trustee/decrypt` with the targets `status` lists — one partial decryption per target, each with its proof. Refused before `closedAt` (VTI-VOT-063) | `voting/trustees/decrypt` |
+
+The transport secret and the polynomial are re-derived from the trustee's path on every use,
+domain-separated, so a repeated `deal` is the same dealing and `justify` reveals exactly the
+share that was dealt. The key share is the sum of other trustees' shares and cannot be
+re-derived; it is kept wrapped under the seed-derived KEK (`secret:trustee:…` in
+`pcs_engine`). No task returns either. An MCP host confirms every `justify` and `decrypt`.
+
+The ballot box puts each enrolment, dealing, confirmation and justification on the board as the
+trustee's request exactly as received, proof included (a `trusteeStep` entry, conventions §9.6),
+so the community and every auditor verify each step as this trustee's. That signature is what
+stops a ballot box dealing in a trustee's name and holding the election key itself.
 
 ## Audit
 
@@ -111,6 +169,8 @@ with it.
 
 ## Not yet
 
+- **Driving the trustee's round** from a CLI or the console. The tasks and the SDK methods
+  (`VtaClient::pcs_trustee_*`) are there; a client still has to carry each step.
 - **Withdrawal.** A vetter's withdrawal of one attestation (the tag and a proof of
   knowledge of its key) is an engine operation, and joins the family once the
   community-side task that accepts it is specified.

@@ -723,6 +723,596 @@ pub(super) async fn handle_vetter_show(
     }
 }
 
+// ─── Voter ───────────────────────────────────────────────────────────────────
+//
+// `vta/pcs/voter/*` and `vta/pcs/vote` (trust-tasks-tf #834, VTI-VOT-020 – 053). Audit names the
+// election and never a tag, a cast, a ballot or a receipt (VTI-VOT-100): the record pairs the
+// caller with an election they took part in, which their community already knows, and nothing
+// that could link them to what they voted.
+
+/// The voter-task preamble: the capability, the payload against its schema, the context.
+async fn voter_preamble<P: DeserializeOwned>(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: &TrustTask<Value>,
+) -> Result<(String, String), TrustTaskOutcome> {
+    require_capability(state, auth, doc, Capability::PcsVoter, "pcs voter").await?;
+    parse_payload::<P>(doc)?;
+    let context = str_of(doc, "contextId").to_string();
+    require_context(doc, auth, &context)?;
+    Ok((context, str_of(doc, "community").to_string()))
+}
+
+/// `vta/pcs/voter/read/0.1`: `vtc/elections/list` or `show`, signed as the member (items 3 – 6).
+pub(super) async fn handle_voter_read(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::voter::read::v0_1 as t;
+    use trust_tasks_rs::specs::vtc::elections::{list::v0_1 as list, show::v0_1 as show};
+    use trust_tasks_rs::validate::ValidatedPayload as _;
+    let (_context, community) = match voter_preamble::<t::Payload>(state, auth, &doc).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let read = doc.payload["read"].as_str().unwrap_or_default();
+    let payload = value_of(&doc, "payload");
+    // Item 3: the read's own payload, against its own schema.
+    let (type_uri, checked) = match read {
+        "list" => (
+            <list::Payload as trust_tasks_rs::Payload>::TYPE_URI,
+            list::Payload::validate_value(&payload).map_err(|e| e.to_string()),
+        ),
+        "show" => (
+            <show::Payload as trust_tasks_rs::Payload>::TYPE_URI,
+            show::Payload::validate_value(&payload).map_err(|e| e.to_string()),
+        ),
+        other => ("", Err(format!("`{other}` is not a read this task signs"))),
+    };
+    if let Err(reason) = checked {
+        return reject_with(
+            &doc,
+            RejectReason::MalformedRequest {
+                reason: format!("payload: {reason}"),
+            },
+        );
+    }
+    let member = doc.payload["member"].as_str().unwrap_or_default();
+    match crate::operations::pcs_voter::sign_read(
+        state, auth, member, &community, type_uri, payload,
+    )
+    .await
+    {
+        Ok(document) => respond::<t::Response>(&doc, json!({ "document": document })),
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::MemberNotHeld(_) => Some(t::error_codes::MEMBER_NOT_HELD),
+            _ => None,
+        }),
+    }
+}
+
+/// `vta/pcs/voter/register/0.1`.
+pub(super) async fn handle_voter_register(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::voter::register::v0_1 as t;
+    let (context, community) = match voter_preamble::<t::Payload>(state, auth, &doc).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let manifest = value_of(&doc, "manifest");
+    // Item 9: the member's key is found, and the caller's standing to act as it checked, before
+    // anything is allocated.
+    let member = match doc.payload.get("member").and_then(Value::as_str) {
+        None => None,
+        Some(did) => {
+            match crate::operations::pcs_voter::PersonaTicketSigner::for_member(state, auth, did)
+                .await
+            {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    return refuse(&doc, e, |_| Some(t::error_codes::MEMBER_NOT_HELD));
+                }
+            }
+        }
+    };
+    match crate::operations::pcs_voter::register(
+        state,
+        &caller(auth),
+        &context,
+        &community,
+        &value_of(&doc, "parameters"),
+        &manifest,
+        member
+            .as_ref()
+            .map(|s| s as &dyn crate::operations::pcs_voter::TicketSigner),
+    )
+    .await
+    {
+        Ok(answer) => {
+            let election = manifest["electionId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            audit(
+                state,
+                "pcs.voter.register",
+                auth,
+                &community,
+                &context,
+                Some(&election),
+            )
+            .await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::ElectionChanged => Some(t::error_codes::ELECTION_CHANGED),
+            PcsError::UnsupportedSuite(_) => Some(t::error_codes::UNSUPPORTED_SUITE),
+            PcsError::ParametersInvalid(_) => Some(t::error_codes::PARAMETERS_INVALID),
+            PcsError::UnsupportedSecrecy(_) => Some(t::error_codes::UNSUPPORTED_SECRECY),
+            PcsError::TicketHeld => Some(t::error_codes::TICKET_HELD),
+            PcsError::MemberNotHeld(_) => Some(t::error_codes::MEMBER_NOT_HELD),
+            _ => None,
+        }),
+    }
+}
+
+/// `vta/pcs/voter/accept/0.1`.
+pub(super) async fn handle_voter_accept(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::voter::accept::v0_1 as t;
+    let (context, community) = match voter_preamble::<t::Payload>(state, auth, &doc).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let election = str_of(&doc, "electionId").to_string();
+    match crate::operations::pcs_voter::accept(
+        state,
+        &caller(auth),
+        &context,
+        &community,
+        &election,
+        &value_of(&doc, "parameters"),
+        &value_of(&doc, "response"),
+    )
+    .await
+    {
+        Ok(answer) => {
+            audit(
+                state,
+                "pcs.voter.accept",
+                auth,
+                &community,
+                &context,
+                Some(&election),
+            )
+            .await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::NotFound => Some(t::error_codes::NOT_FOUND),
+            PcsError::NoRequestInFlight => Some(t::error_codes::NO_REQUEST_IN_FLIGHT),
+            PcsError::CredentialInvalid(_) => Some(t::error_codes::CREDENTIAL_INVALID),
+            PcsError::ParametersInvalid(_) | PcsError::UnsupportedSuite(_) => {
+                Some(t::error_codes::PARAMETERS_INVALID)
+            }
+            _ => None,
+        }),
+    }
+}
+
+/// `vta/pcs/vote/0.1`.
+pub(super) async fn handle_vote(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::vote::v0_1 as t;
+    let (context, community) = match voter_preamble::<t::Payload>(state, auth, &doc).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let manifest = value_of(&doc, "manifest");
+    match crate::operations::pcs_voter::vote(
+        state,
+        &caller(auth),
+        &context,
+        &community,
+        &value_of(&doc, "parameters"),
+        &manifest,
+        &value_of(&doc, "ballot"),
+        chrono::Utc::now(),
+    )
+    .await
+    {
+        Ok(answer) => {
+            // The election, and nothing that names the cast (VTI-VOT-100).
+            let election = manifest["electionId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            audit(
+                state,
+                "pcs.vote",
+                auth,
+                &community,
+                &context,
+                Some(&election),
+            )
+            .await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::NotFound => Some(t::error_codes::NOT_FOUND),
+            PcsError::ManifestMismatch => Some(t::error_codes::MANIFEST_MISMATCH),
+            PcsError::BallotInvalid(_) => Some(t::error_codes::BALLOT_INVALID),
+            PcsError::NotOpen => Some(t::error_codes::NOT_OPEN),
+            PcsError::ParametersInvalid(_) | PcsError::UnsupportedSuite(_) => {
+                Some(t::error_codes::PARAMETERS_INVALID)
+            }
+            _ => None,
+        }),
+    }
+}
+
+/// `vta/pcs/voter/receipt/0.1`.
+pub(super) async fn handle_voter_receipt(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::voter::receipt::v0_1 as t;
+    let (context, community) = match voter_preamble::<t::Payload>(state, auth, &doc).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let election = str_of(&doc, "electionId").to_string();
+    match crate::operations::pcs_voter::receipt(
+        state,
+        &context,
+        &community,
+        &election,
+        &value_of(&doc, "receipt"),
+        doc.payload.get("checkpoint"),
+        doc.payload.get("inclusion"),
+    )
+    .await
+    {
+        Ok(answer) => {
+            audit(
+                state,
+                "pcs.voter.receipt",
+                auth,
+                &community,
+                &context,
+                Some(&election),
+            )
+            .await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::NotFound => Some(t::error_codes::NOT_FOUND),
+            PcsError::ReceiptInvalid(_) => Some(t::error_codes::RECEIPT_INVALID),
+            PcsError::EvidenceInvalid(_) => Some(t::error_codes::EVIDENCE_INVALID),
+            _ => None,
+        }),
+    }
+}
+
+/// `vta/pcs/vote-encrypted/0.1`.
+pub(super) async fn handle_vote_encrypted(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::vote_encrypted::v0_1 as t;
+    let (context, community) = match voter_preamble::<t::Payload>(state, auth, &doc).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let manifest = value_of(&doc, "manifest");
+    match crate::operations::pcs_voter::vote_encrypted(
+        state,
+        &caller(auth),
+        &context,
+        &community,
+        &value_of(&doc, "parameters"),
+        &manifest,
+        &value_of(&doc, "electionKey"),
+        &value_of(&doc, "ballot"),
+        chrono::Utc::now(),
+    )
+    .await
+    {
+        Ok(answer) => {
+            // The election, and nothing that names the cast (VTI-VOT-100).
+            let election = manifest["electionId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            audit(
+                state,
+                "pcs.vote",
+                auth,
+                &community,
+                &context,
+                Some(&election),
+            )
+            .await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::NotFound => Some(t::error_codes::NOT_FOUND),
+            PcsError::WrongLevel => Some(t::error_codes::WRONG_LEVEL),
+            PcsError::ElectionKeyInvalid(_) => Some(t::error_codes::ELECTION_KEY_INVALID),
+            PcsError::BallotInvalid(_) | PcsError::ManifestMismatch => {
+                Some(t::error_codes::BALLOT_INVALID)
+            }
+            PcsError::NotOpen => Some(t::error_codes::NOT_OPEN),
+            _ => None,
+        }),
+    }
+}
+
+/// The trustee tasks' common preamble: the capability, the payload against its schema, and
+/// standing over the context (`vta/pcs/trustee/*` items 1 – 2).
+async fn trustee_preamble<P: DeserializeOwned>(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: &TrustTask<Value>,
+) -> Result<(String, String, String), TrustTaskOutcome> {
+    require_capability(state, auth, doc, Capability::PcsTrustee, "pcs trustee").await?;
+    parse_payload::<P>(doc)?;
+    let context = str_of(doc, "contextId").to_string();
+    require_context(doc, auth, &context)?;
+    Ok((
+        context,
+        str_of(doc, "community").to_string(),
+        str_of(doc, "trustee").to_string(),
+    ))
+}
+
+async fn trustee_audit(
+    state: &AppState,
+    action: &str,
+    auth: &AuthClaims,
+    community: &str,
+    context: &str,
+    doc: &TrustTask<Value>,
+) {
+    let election = str_of(doc, "electionId").to_string();
+    audit(state, action, auth, community, context, Some(&election)).await;
+}
+
+/// `vta/pcs/trustee/enrol/0.1`.
+pub(super) async fn handle_trustee_enrol(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::trustee::enrol::v0_1 as t;
+    let (context, community, trustee) =
+        match trustee_preamble::<t::Payload>(state, auth, &doc).await {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+    match crate::operations::pcs_trustee::enrol(
+        state,
+        &caller(auth),
+        auth,
+        &context,
+        &community,
+        &trustee,
+        &value_of(&doc, "manifest"),
+    )
+    .await
+    {
+        Ok(answer) => {
+            trustee_audit(state, "pcs.trustee.enrol", auth, &community, &context, &doc).await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::TrusteeNotHeld(_) => Some(t::error_codes::TRUSTEE_NOT_HELD),
+            PcsError::NotTrustee => Some(t::error_codes::NOT_TRUSTEE),
+            _ => None,
+        }),
+    }
+}
+
+/// `vta/pcs/trustee/deal/0.1`.
+pub(super) async fn handle_trustee_deal(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::trustee::deal::v0_1 as t;
+    let (context, community, trustee) =
+        match trustee_preamble::<t::Payload>(state, auth, &doc).await {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+    match crate::operations::pcs_trustee::deal_task(
+        state,
+        &caller(auth),
+        auth,
+        &context,
+        &community,
+        &trustee,
+        &value_of(&doc, "manifest"),
+        &value_of(&doc, "transportKeys"),
+    )
+    .await
+    {
+        Ok(answer) => {
+            trustee_audit(state, "pcs.trustee.deal", auth, &community, &context, &doc).await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::TrusteeNotHeld(_) => Some(t::error_codes::TRUSTEE_NOT_HELD),
+            PcsError::NotEnrolled | PcsError::ElectionChanged => Some(t::error_codes::NOT_ENROLLED),
+            PcsError::TransportKeysInvalid(_) => Some(t::error_codes::TRANSPORT_KEYS_INVALID),
+            _ => None,
+        }),
+    }
+}
+
+/// `vta/pcs/trustee/keys/0.1`.
+pub(super) async fn handle_trustee_keys(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::trustee::keys::v0_1 as t;
+    let (context, community, trustee) =
+        match trustee_preamble::<t::Payload>(state, auth, &doc).await {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+    match crate::operations::pcs_trustee::keys(
+        state,
+        &caller(auth),
+        auth,
+        &context,
+        &community,
+        &trustee,
+        &value_of(&doc, "manifest"),
+        &value_of(&doc, "dealings"),
+        doc.payload.get("justifications"),
+        doc.payload.get("electionKey"),
+    )
+    .await
+    {
+        Ok(answer) => {
+            trustee_audit(state, "pcs.trustee.keys", auth, &community, &context, &doc).await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::TrusteeNotHeld(_) => Some(t::error_codes::TRUSTEE_NOT_HELD),
+            PcsError::NotEnrolled | PcsError::ElectionChanged => Some(t::error_codes::NOT_ENROLLED),
+            PcsError::KeyMismatch | PcsError::ElectionKeyInvalid(_) => {
+                Some(t::error_codes::KEY_MISMATCH)
+            }
+            _ => None,
+        }),
+    }
+}
+
+/// `vta/pcs/trustee/justify/0.1`.
+pub(super) async fn handle_trustee_justify(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::trustee::justify::v0_1 as t;
+    let (context, community, trustee) =
+        match trustee_preamble::<t::Payload>(state, auth, &doc).await {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+    let recipient = doc.payload["recipient"].as_u64().unwrap_or_default() as u32;
+    match crate::operations::pcs_trustee::justify(
+        state,
+        &caller(auth),
+        auth,
+        &context,
+        &community,
+        str_of(&doc, "electionId"),
+        &trustee,
+        recipient,
+    )
+    .await
+    {
+        Ok(answer) => {
+            trustee_audit(
+                state,
+                "pcs.trustee.justify",
+                auth,
+                &community,
+                &context,
+                &doc,
+            )
+            .await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::TrusteeNotHeld(_) => Some(t::error_codes::TRUSTEE_NOT_HELD),
+            PcsError::NoDealing | PcsError::NotEnrolled => Some(t::error_codes::NO_DEALING),
+            _ => None,
+        }),
+    }
+}
+
+/// `vta/pcs/trustee/decrypt/0.1`.
+pub(super) async fn handle_trustee_decrypt(
+    state: &AppState,
+    auth: &AuthClaims,
+    doc: TrustTask<Value>,
+) -> TrustTaskOutcome {
+    use spec::trustee::decrypt::v0_1 as t;
+    let (context, community, trustee) =
+        match trustee_preamble::<t::Payload>(state, auth, &doc).await {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+    let Some(closed_at) = str_of(&doc, "closedAt")
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .ok()
+    else {
+        return reject_with(
+            &doc,
+            RejectReason::MalformedRequest {
+                reason: "closedAt".into(),
+            },
+        );
+    };
+    match crate::operations::pcs_trustee::decrypt(
+        state,
+        auth,
+        &context,
+        &community,
+        str_of(&doc, "electionId"),
+        &trustee,
+        &value_of(&doc, "targets"),
+        closed_at,
+        chrono::Utc::now(),
+    )
+    .await
+    {
+        Ok(answer) => {
+            trustee_audit(
+                state,
+                "pcs.trustee.decrypt",
+                auth,
+                &community,
+                &context,
+                &doc,
+            )
+            .await;
+            respond::<t::Response>(&doc, answer)
+        }
+        Err(e) => refuse(&doc, e, |e| match e {
+            PcsError::TrusteeNotHeld(_) => Some(t::error_codes::TRUSTEE_NOT_HELD),
+            PcsError::KeyNotHeld => Some(t::error_codes::KEY_NOT_HELD),
+            PcsError::NotClosed => Some(t::error_codes::NOT_CLOSED),
+            _ => None,
+        }),
+    }
+}
+
 #[cfg(test)]
 #[path = "pcs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "pcs_voter_tests.rs"]
+mod voter_tests;
+
+#[cfg(test)]
+#[path = "pcs_trustee_tests.rs"]
+mod trustee_tests;

@@ -331,6 +331,32 @@ pub enum Capability {
     /// principal — [`Role::Admin`] and [`Role::Initiator`] — and never by
     /// [`Role::Application`], as for [`Capability::PcsVetter`].
     WitnessRequest,
+    /// Acting as the principal's **voter** in a community's elections — the
+    /// voter tasks `vta/pcs/voter/{register,accept,receipt}` and `vta/pcs/vote`:
+    /// a key per election, the blinded ticket request, the cast, and checking
+    /// receipts (VTI-VOT-020 – 033, VTI-VOT-053).
+    ///
+    /// Registered upstream as `pcsVoter`. Not [`Capability::Sign`], for the same
+    /// reason as [`Capability::PcsVetter`]: a vote is the principal's, so it is
+    /// derived by the roles that act as the principal and never by
+    /// [`Role::Application`] — an agent votes for the principal only where it is
+    /// granted this by name.
+    ///
+    PcsVoter,
+    /// Acting as the principal's **trustee** in a community's sealed or
+    /// tallied-encrypted elections — `vta/pcs/trustee/{enrol,deal,keys,justify,decrypt}`:
+    /// a transport key and a share of the election key per election, kept here,
+    /// and the documents a trustee publishes, signed as the trustee persona
+    /// (VTI-VOT-062, VTI-VOT-063).
+    ///
+    /// Registered upstream as `pcsTrustee`. Not [`Capability::Sign`]: the VTA
+    /// signs only the trustee documents it builds. A trustee's share decides an
+    /// election's secrecy, so it is derived by the roles that act as the
+    /// principal and never by [`Role::Application`].
+    ///
+    /// Last on purpose: a variant inserted before another shifts its implicit
+    /// discriminant, which is a breaking change to a published enum.
+    PcsTrustee,
 }
 
 /// Capabilities that no role derives, and that an entry therefore holds only
@@ -469,6 +495,8 @@ pub fn derived_capabilities_for_role(role: &Role) -> Vec<Capability> {
             Capability::ExternalAuthUse,
             Capability::PcsVetter,
             Capability::PcsApplicant,
+            Capability::PcsVoter,
+            Capability::PcsTrustee,
             Capability::WitnessRequest,
         ],
         Role::Initiator => vec![
@@ -492,6 +520,8 @@ pub fn derived_capabilities_for_role(role: &Role) -> Vec<Capability> {
             Capability::ExternalAuthUse,
             Capability::PcsVetter,
             Capability::PcsApplicant,
+            Capability::PcsVoter,
+            Capability::PcsTrustee,
             Capability::WitnessRequest,
         ],
         // `application` is the role a memory agent runs as — `vta-agent-memory`
@@ -1960,7 +1990,12 @@ mod tests {
     /// implied by `sign` (VTI-VTA-007).
     #[test]
     fn pcs_capabilities_are_the_principals_and_not_sign() {
-        for cap in [Capability::PcsVetter, Capability::PcsApplicant] {
+        for cap in [
+            Capability::PcsVetter,
+            Capability::PcsApplicant,
+            Capability::PcsVoter,
+            Capability::PcsTrustee,
+        ] {
             assert!(role_has_capability(&Role::Admin, cap));
             assert!(role_has_capability(&Role::Initiator, cap));
             assert!(!role_has_capability(&Role::Application, cap));
@@ -1975,6 +2010,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Capability::PcsApplicant).unwrap(),
             "pcs-applicant"
+        );
+        assert_eq!(
+            serde_json::to_value(Capability::PcsVoter).unwrap(),
+            "pcs-voter"
+        );
+        assert_eq!(
+            serde_json::to_value(Capability::PcsTrustee).unwrap(),
+            "pcs-trustee"
         );
     }
 

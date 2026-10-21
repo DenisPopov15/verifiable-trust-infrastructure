@@ -65,6 +65,7 @@ mod directory;
 mod directory_external;
 mod directory_notes;
 mod directory_present;
+mod election_tasks;
 mod emergency_bootstrap;
 mod endorsements;
 mod git_ns_vtc_client;

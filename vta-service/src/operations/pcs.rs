@@ -70,7 +70,10 @@ pub enum PcsError {
     LabelNotLive(String),
     NoRequestInFlight,
     CredentialInvalid(String),
-    CountExceedsDrip { asked: usize, drip: usize },
+    CountExceedsDrip {
+        asked: usize,
+        drip: usize,
+    },
     AlreadyInFlight,
     NoDrawInFlight,
     TokensInvalid(String),
@@ -80,6 +83,29 @@ pub enum PcsError {
     CommunityMismatch,
     AttestationInvalid(String),
     NoUsableAttestation,
+    // The voter role (`vta/pcs/voter/*`, `vta/pcs/vote`; operations::pcs_voter).
+    ElectionChanged,
+    UnsupportedSecrecy(String),
+    TicketHeld,
+    ManifestMismatch,
+    BallotInvalid(String),
+    NotOpen,
+    ReceiptInvalid(String),
+    EvidenceInvalid(String),
+    /// `member` names a DID this engine holds no `authentication` key of that the caller may act as.
+    MemberNotHeld(String),
+    // The encrypted levels (`vta/pcs/vote-encrypted`, `vta/pcs/trustee/*`;
+    // operations::pcs_trustee).
+    WrongLevel,
+    ElectionKeyInvalid(String),
+    /// `trustee` names a DID this engine holds no `authentication` key of that the caller may act as.
+    TrusteeNotHeld(String),
+    NotTrustee,
+    TransportKeysInvalid(String),
+    KeyMismatch,
+    NoDealing,
+    KeyNotHeld,
+    NotClosed,
     App(AppError),
 }
 
@@ -120,19 +146,53 @@ impl std::fmt::Display for PcsError {
             Self::NoUsableAttestation => {
                 f.write_str("no held attestation is usable under the parameters as they stand")
             }
+            Self::ElectionChanged => f.write_str(
+                "the engine holds this election under another manifest digest or voting key",
+            ),
+            Self::UnsupportedSecrecy(s) => write!(f, "secrecy level {s} is not served by 0.1"),
+            Self::MemberNotHeld(did) => write!(
+                f,
+                "this agent holds no authentication key of {did} that you may act as, so it \
+                 cannot sign the ticket request as it"
+            ),
+            Self::TicketHeld => f.write_str("a ticket for this election is already held"),
+            Self::ManifestMismatch => f.write_str(
+                "the manifest or ballot is not the one this election was registered with",
+            ),
+            Self::BallotInvalid(e) => write!(f, "the ballot does not answer the manifest: {e}"),
+            Self::NotOpen => f.write_str("voting is not open"),
+            Self::ReceiptInvalid(e) => write!(f, "the receipt is not this voter's: {e}"),
+            Self::EvidenceInvalid(e) => write!(f, "the inclusion evidence does not verify: {e}"),
+            Self::WrongLevel => f.write_str(
+                "the manifest's level is open: an open ballot is cast with vta/pcs/vote",
+            ),
+            Self::ElectionKeyInvalid(e) => write!(f, "the election key does not hold together: {e}"),
+            Self::TrusteeNotHeld(did) => write!(
+                f,
+                "this agent holds no authentication key of {did} that you may act as, so it \
+                 cannot act as that trustee"
+            ),
+            Self::NotTrustee => f.write_str("the manifest does not name this DID as a trustee"),
+            Self::TransportKeysInvalid(e) => write!(f, "the transport keys do not verify: {e}"),
+            Self::KeyMismatch => f.write_str(
+                "the election key's verification key for this trustee is not the share computed here",
+            ),
+            Self::NoDealing => f.write_str("this engine has not dealt for this trustee and election"),
+            Self::KeyNotHeld => f.write_str("this engine holds no key share for this trustee and election"),
+            Self::NotClosed => f.write_str("voting has not closed: nothing is decrypted before it does"),
             Self::App(e) => write!(f, "{e}"),
         }
     }
 }
 
-type Result<T> = std::result::Result<T, PcsError>;
+pub(super) type Result<T> = std::result::Result<T, PcsError>;
 
 /// Serialise engine read-modify-writes. One lock for the engine: its traffic is a person's
 /// pace (a session, a drip a few times a day), and an interleaved write would lose a token or
 /// an attestation.
 static WRITE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-async fn write_lock() -> MutexGuard<'static, ()> {
+pub(super) async fn write_lock() -> MutexGuard<'static, ()> {
     WRITE_LOCK.lock().await
 }
 
@@ -206,7 +266,7 @@ pub struct Caller<'a> {
     pub channel: &'a str,
 }
 
-async fn load_secret_json<T: serde::de::DeserializeOwned>(
+pub(super) async fn load_secret_json<T: serde::de::DeserializeOwned>(
     state: &AppState,
     key: &str,
     key_type: &str,
@@ -224,7 +284,7 @@ async fn load_secret_json<T: serde::de::DeserializeOwned>(
     })
 }
 
-async fn store_secret_json<T: Serialize>(
+pub(super) async fn store_secret_json<T: Serialize>(
     state: &AppState,
     key: &str,
     key_type: &str,
@@ -288,7 +348,7 @@ pub fn community_params(community: &str, published: &Value) -> Result<CommunityP
     .map_err(|e| PcsError::ParametersInvalid(e.to_string()))
 }
 
-fn proto(e: ProtoError) -> PcsError {
+pub(super) fn proto(e: ProtoError) -> PcsError {
     PcsError::App(AppError::Internal(format!("PCS engine: {e}")))
 }
 
@@ -296,7 +356,10 @@ fn proto(e: ProtoError) -> PcsError {
 
 /// Allocate a fresh path under the context's base, for a new member key. The counter is the
 /// one key records use, so no record is ever given this path.
-async fn allocate_member_path(state: &AppState, context_id: &str) -> Result<(String, u32)> {
+pub(super) async fn allocate_member_path(
+    state: &AppState,
+    context_id: &str,
+) -> Result<(String, u32)> {
     let ctx = crate::contexts::get_context(&state.contexts_ks, context_id)
         .await?
         .ok_or(PcsError::NotFound)?;
@@ -307,7 +370,7 @@ async fn allocate_member_path(state: &AppState, context_id: &str) -> Result<(Str
     Ok((path, seed_id))
 }
 
-async fn member_seed(
+pub(super) async fn member_seed(
     state: &AppState,
     caller: &Caller<'_>,
     context_id: &str,
