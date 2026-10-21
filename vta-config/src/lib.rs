@@ -211,6 +211,12 @@ pub struct AppConfig {
     pub mediator_readiness: MediatorReadinessConfig,
     #[serde(default)]
     pub services: ServicesConfig,
+    /// How the DIDs this VTA creates are presented (`[dids]`): as `did:webvh`
+    /// or as their `did:scid:vh:1` DID, and whether a new log lists its
+    /// did:scid alias (VTI-VTA-034, VTI-VTA-035). A create request, or the VTC
+    /// it is made for, overrides both (VTI-VTA-036).
+    #[serde(default)]
+    pub dids: DidsConfig,
     #[serde(default)]
     pub auth: AuthConfig,
     #[serde(default)]
@@ -439,6 +445,35 @@ pub struct ServicesConfig {
 
 fn default_true() -> bool {
     true
+}
+
+/// `[dids]` — how the DIDs this VTA creates are presented.
+///
+/// Every new DID is a `did:webvh` log (VTI-KEY-165). These choose the identity
+/// it is given out as and whether its first entry lists the did:scid alias. A
+/// create request states its own, and a VTC states the community's in its
+/// requests; this is what applies when neither does (VTI-VTA-036).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DidsConfig {
+    /// `webvh` (the default) or `scid` (VTI-VTA-034).
+    #[serde(default)]
+    pub default_did_method: vta_sdk::did_scid::DidMethod,
+    /// Whether a new `did:webvh` log lists its `did:scid:vh:1` DID URL in
+    /// `alsoKnownAs`, linking the two forms as one subject (VTI-KEY-164,
+    /// VTI-KEY-166, VTI-VTA-035). Default `true`. A DID presented as did:scid
+    /// always lists it, whatever this says.
+    #[serde(default = "default_true")]
+    pub scid_also_known_as: bool,
+}
+
+impl Default for DidsConfig {
+    fn default() -> Self {
+        Self {
+            default_did_method: vta_sdk::did_scid::DidMethod::default(),
+            scid_also_known_as: true,
+        }
+    }
 }
 
 impl Default for ServicesConfig {
@@ -1219,6 +1254,8 @@ impl AppConfig {
                 "VTA_SERVER_PORT",
                 "VTA_PUBLIC_URL",
                 "VTA_STORE_DATA_DIR",
+                "VTA_DIDS_DEFAULT_DID_METHOD",
+                "VTA_DIDS_SCID_ALSO_KNOWN_AS",
                 "VTA_MESSAGING_MEDIATOR_URL",
                 "VTA_MESSAGING_MEDIATOR_DID",
                 "VTA_SECRETS_SEED",
@@ -1294,6 +1331,22 @@ impl AppConfig {
         }
         if let Ok(data_dir) = std::env::var("VTA_STORE_DATA_DIR") {
             config.store.data_dir = PathBuf::from(data_dir);
+        }
+        if let Ok(method) = std::env::var("VTA_DIDS_DEFAULT_DID_METHOD") {
+            config.dids.default_did_method = method.parse().map_err(|e| {
+                AppError::Config(format!("invalid VTA_DIDS_DEFAULT_DID_METHOD: {e}"))
+            })?;
+        }
+        if let Ok(alias) = std::env::var("VTA_DIDS_SCID_ALSO_KNOWN_AS") {
+            config.dids.scid_also_known_as = match alias.trim().to_ascii_lowercase().as_str() {
+                "true" | "1" | "yes" => true,
+                "false" | "0" | "no" => false,
+                other => {
+                    return Err(AppError::Config(format!(
+                        "invalid VTA_DIDS_SCID_ALSO_KNOWN_AS '{other}', expected 'true' or 'false'"
+                    )));
+                }
+            };
         }
         // Fjall memory settings (STORAGE_FJALL_BLOCK_CACHE / _WRITE_BUFFER /
         // _MAX_JOURNAL) — shared, unprefixed names; see

@@ -99,6 +99,13 @@ pub struct WizardInputs {
     )]
     pub services: ServicesConfig,
 
+    /// How the DIDs this VTA creates are presented (`[dids]`), its own included:
+    /// `default_did_method = "scid"` presents the VTA DID minted here as its
+    /// `did:scid:vh:1` DID (VTI-VTA-034). Defaults to `did:webvh`, with the
+    /// did:scid alias listed (VTI-VTA-035).
+    #[serde(default)]
+    pub dids: crate::config::DidsConfig,
+
     /// HTTP server bind. Defaults to `0.0.0.0:8100`.
     #[serde(default)]
     pub server: ServerConfig,
@@ -1235,6 +1242,7 @@ pub async fn apply_inputs(
         },
         fjall: Default::default(),
         services: inputs.services.clone(),
+        dids: inputs.dids.clone(),
         messaging: messaging.clone(),
         mediator_readiness: Default::default(),
         auth: {
@@ -1823,6 +1831,7 @@ fn scratch_config_for_seed_store(
         store: StoreConfig { data_dir },
         fjall: Default::default(),
         services: ServicesConfig::default(),
+        dids: Default::default(),
         messaging: None,
         mediator_readiness: Default::default(),
         auth: AuthConfig::default(),
@@ -2370,6 +2379,7 @@ mod tests {
             public_url: None,
             data_dir: root.join("data"),
             data_dir_exists: ExistingDataDirPolicy::default(),
+            dids: Default::default(),
             services: ServicesConfig {
                 rest: false,
                 didcomm: false,
