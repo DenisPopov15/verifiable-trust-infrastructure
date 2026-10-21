@@ -1793,12 +1793,15 @@ mod tests {
             text("did:key:z6MkKa#key-1"),           // ka key id
             Answer::Bool(true), // portable (existing-keys still prompts — no pre-signed log)
             text("2"),          // pre-rotation count
+            Answer::Index(0),   // present the VTA's DIDs as did:webvh
+            Answer::Bool(true), // ...listing the did:scid alias
         ];
         let p = ScriptedPrompter::new(answers);
         let gathered = gather_inputs(&p, None)
             .await
             .expect("gather should succeed")
             .expect("gather should not cancel");
+        assert_eq!(gathered.dids, crate::config::DidsConfig::default());
 
         match gathered.vta_did {
             VtaDidInput::CreateWebvh {

@@ -162,11 +162,10 @@ mod tests {
                 alias: false
             }
         );
-        assert_eq!(
+        assert!(
             decide(None, Some(true), false, &cfg(DidMethod::Webvh, false))
                 .unwrap()
-                .alias,
-            true
+                .alias
         );
         assert_eq!(
             decide(None, Some(false), false, &defaults).unwrap(),
