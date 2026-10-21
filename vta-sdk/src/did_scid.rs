@@ -28,6 +28,7 @@ pub const WEBVH_PREFIX: &str = "did:webvh:";
 /// VTI-VTA-034, VTI-VTC-004). The log is a `did:webvh` log either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[non_exhaustive]
 pub enum DidMethod {
     /// `did:webvh:<scid>:<host>[:<path>]` — the default.

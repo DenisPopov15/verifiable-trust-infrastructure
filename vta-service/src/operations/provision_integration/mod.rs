@@ -357,6 +357,7 @@ pub async fn provision_integration(
     // ACL default → system default). Removed from the map for the same
     // reason as `WEBVH_PATH` — transport metadata, not document content.
     let webvh_domain = webvh::take_webvh_domain(&mut template_vars)?;
+    let (did_method, scid_also_known_as) = webvh::take_did_presentation(&mut template_vars)?;
 
     // Decide whether the minted DID should become the context's primary
     // DID. First-integration wins: when the context has no DID yet, bind
@@ -547,6 +548,8 @@ pub async fn provision_integration(
                     // provision-integration always creates an integration DID,
                     // never the VTA's own identity.
                     is_vta_identity: false,
+                    did_method,
+                    scid_also_known_as,
                 },
                 "provision-integration",
             )
@@ -1447,7 +1450,14 @@ async fn provision_did_peer(
     // A did:peer is self-contained: there is nothing to host, so webvh
     // vars are meaningless here. Reject them rather than silently drop —
     // their presence means the operator picked the wrong template.
-    for forbidden in ["WEBVH_SERVER", "URL", "WEBVH_PATH", "WEBVH_DOMAIN"] {
+    for forbidden in [
+        "WEBVH_SERVER",
+        "URL",
+        "WEBVH_PATH",
+        "WEBVH_DOMAIN",
+        "DID_METHOD",
+        "SCID_ALSO_KNOWN_AS",
+    ] {
         if template_vars.get(forbidden).is_some_and(|v| !v.is_null()) {
             return Err(AppError::Validation(format!(
                 "did:peer agent template does not accept '{forbidden}' — a did:peer is \

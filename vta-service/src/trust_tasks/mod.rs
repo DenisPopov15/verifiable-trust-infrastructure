@@ -209,6 +209,7 @@ const KNOWN_FEATURE_GATED_URIS: &[&str] = &[
     vta_sdk::trust_tasks::TASK_WEBVH_DIDS_LIST_1_0,
     vta_sdk::trust_tasks::TASK_WEBVH_DIDS_CREATE_1_0,
     vta_sdk::trust_tasks::TASK_WEBVH_DIDS_CREATE_1_1,
+    vta_sdk::trust_tasks::TASK_WEBVH_DIDS_CREATE_1_2,
     vta_sdk::trust_tasks::TASK_WEBVH_DIDS_GET_1_0,
     vta_sdk::trust_tasks::TASK_WEBVH_DIDS_DELETE_1_0,
     vta_sdk::trust_tasks::TASK_WEBVH_DIDS_UPDATE_1_0,
@@ -3259,7 +3260,10 @@ dispatch_table! {
     vta_sdk::trust_tasks::TASK_WEBVH_DIDS_CREATE_1_0 => webvh::handle_dids_create_1_0
         [ Mutating None false ],
     #[cfg(feature = "webvh")]
-    vta_sdk::trust_tasks::TASK_WEBVH_DIDS_CREATE_1_1 => webvh::handle_dids_create
+    vta_sdk::trust_tasks::TASK_WEBVH_DIDS_CREATE_1_1 => webvh::handle_dids_create_1_1
+        [ Mutating None false ],
+    #[cfg(feature = "webvh")]
+    vta_sdk::trust_tasks::TASK_WEBVH_DIDS_CREATE_1_2 => webvh::handle_dids_create
         [ Mutating None false ],
     #[cfg(feature = "webvh")]
     vta_sdk::trust_tasks::TASK_WEBVH_DIDS_GET_1_0 => webvh::handle_dids_get
