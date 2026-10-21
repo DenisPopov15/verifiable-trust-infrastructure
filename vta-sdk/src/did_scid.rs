@@ -145,6 +145,48 @@ pub fn scid_forms(webvh_did: &str) -> Option<(String, String)> {
     Some((bare, url))
 }
 
+/// The did:webvh DID of the log a `did:scid:vh:1:<scid>?src=<source>` DID URL
+/// names: `<source>` with each `/` replaced by `:` (VTI-KEY-160). A reader's
+/// leniency is applied first — an `https://`/`http://` scheme and trailing `/`
+/// dropped, a literal `:` before a port encoded as `%3A`. `None` for a bare
+/// did:scid (it names no source), another format, or a malformed `src`.
+pub fn webvh_did(did_url: &str) -> Option<String> {
+    let did_url = did_url.split('#').next().unwrap_or(did_url);
+    let scid = did_url.strip_prefix(SCID_VH_PREFIX)?.split('?').next()?;
+    if scid.is_empty() || scid.contains(':') {
+        return None;
+    }
+    let source = src(did_url)?;
+    let source = source
+        .strip_prefix("https://")
+        .or_else(|| source.strip_prefix("http://"))
+        .unwrap_or(source)
+        .trim_end_matches('/');
+    let (host, path) = match source.split_once('/') {
+        Some((h, p)) => (h, Some(p)),
+        None => (source, None),
+    };
+    let host = match host.split_once(':') {
+        Some((h, port)) if !h.is_empty() && port.parse::<u16>().is_ok() => {
+            format!("{h}%3A{port}")
+        }
+        Some(_) => return None,
+        None => host.to_string(),
+    };
+    if host.is_empty() {
+        return None;
+    }
+    let mut out = format!("{WEBVH_PREFIX}{scid}:{host}");
+    if let Some(path) = path.filter(|p| !p.is_empty()) {
+        if path.split('/').any(str::is_empty) {
+            return None;
+        }
+        out.push(':');
+        out.push_str(&path.replace('/', ":"));
+    }
+    Some(out)
+}
+
 /// The SCID a `did:webvh` or `did:scid:vh:1` reference carries.
 pub fn scid_of(did: &str) -> Option<&str> {
     let did = did.split('#').next().unwrap_or(did);
@@ -255,6 +297,40 @@ mod tests {
         assert_eq!(scid_forms("did:key:z6Mk"), None);
         assert_eq!(scid_of("did:scid:vh:1:Qm?src=a#k"), Some("Qm"));
         assert_eq!(scid_of("did:webvh:Qm:a"), Some("Qm"));
+    }
+
+    #[test]
+    fn a_did_url_names_its_log() {
+        assert_eq!(
+            webvh_did("did:scid:vh:1:Qm?src=example.com/alice").as_deref(),
+            Some("did:webvh:Qm:example.com:alice")
+        );
+        for lenient in [
+            "did:scid:vh:1:Qm?src=https://localhost:8000/a/",
+            "did:scid:vh:1:Qm?src=localhost%3A8000/a",
+            "did:scid:vh:1:Qm?src=localhost:8000/a#key-1",
+        ] {
+            assert_eq!(
+                webvh_did(lenient).as_deref(),
+                Some("did:webvh:Qm:localhost%3A8000:a"),
+                "{lenient}"
+            );
+        }
+        for none in [
+            "did:scid:vh:1:Qm",
+            "did:scid:ke:1:Qm?src=example.com",
+            "did:scid:vh:1:Qm?src=example.com:notaport",
+            "did:scid:vh:1:Qm?src=example.com//a",
+            "did:webvh:Qm:example.com",
+        ] {
+            assert_eq!(webvh_did(none), None, "{none}");
+        }
+        // The two directions agree.
+        let (_, url) = scid_forms("did:webvh:Qm:localhost%3A8000:a:b").unwrap();
+        assert_eq!(
+            webvh_did(&url).as_deref(),
+            Some("did:webvh:Qm:localhost%3A8000:a:b")
+        );
     }
 
     #[test]
