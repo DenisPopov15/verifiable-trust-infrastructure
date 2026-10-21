@@ -715,7 +715,8 @@ async fn dispatch_trust_task_validated(
     //     `sender_did` then read a DID the document proves, whatever the task's
     //     own proof requirement.
     if matches!(ctx.transport, JoinTransport::DIDComm | JoinTransport::Tsp) {
-        let base = |d: &str| d.split('#').next().unwrap_or(d).to_string();
+        // By identity: a did:scid's `src` locator is not part of it (VTI-KEY-160).
+        let base = vta_sdk::did_scid::identity;
         match (ctx.verified_signer.as_deref(), ctx.sender_did.as_deref()) {
             (Some(signer), Some(sender)) if base(signer) == base(sender) => {}
             (None, _) => {
@@ -3595,8 +3596,9 @@ async fn resolve_holder(
         },
     };
     if let Some(issuer) = doc.issuer.as_deref() {
-        let issuer_base = issuer.split('#').next().unwrap_or(issuer);
-        if issuer_base != proven {
+        // By identity, as the holder was authenticated (VTI-KEY-160).
+        let issuer_base = vta_sdk::did_scid::identity(issuer);
+        if issuer_base != vta_sdk::did_scid::identity(&proven) {
             return Err(reject_with(
                 doc,
                 RejectReason::PermissionDenied {
