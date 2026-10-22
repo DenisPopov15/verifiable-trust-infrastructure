@@ -250,6 +250,8 @@ fn audit_room(
     record_key: Option<&str>,
 ) {
     let entry = rooms_audit::for_operation(room.visibility, authorized, record_key);
+    #[cfg(test)]
+    AUDITED.with(|audited| audited.borrow_mut().push(operation.action_name()));
     tracing::info!(
         action = operation.action_name(),
         room = %entry.room_id,
@@ -258,6 +260,15 @@ fn audit_room(
         visibility = ?room.visibility,
         "room operation"
     );
+}
+
+// What `audit_room` recorded on this thread, so a test can assert on the trail without
+// capturing log output. A thread-local `tracing` subscriber is not reliable for that when
+// other tests share the process (`cargo test`): a callsite's cached interest can be settled
+// by another thread before the subscriber exists, and the event is then never delivered.
+#[cfg(test)]
+thread_local! {
+    static AUDITED: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 fn now() -> u64 {
@@ -1267,19 +1278,13 @@ async fn epoch_prune(state: &HostState, doc: &TrustTask<Value>, payload: Value) 
         Ok(a) => a,
         Err(e) => return from_app_error(doc, &e),
     };
-    if req.before_epoch >= room.epoch {
-        return from_app_error(
-            doc,
-            &AppError::Validation(format!(
-                "`beforeEpoch` {} is at or above the current epoch {} of `{}`; pruning there \
-                 would drop the whole chain, not shorten it",
-                req.before_epoch, room.epoch, req.room_id
-            )),
-        );
+    // The declared `notAhead`, with the room's current epoch in `details.epoch`.
+    if let Some(refusal) = vti_rooms::blob_tasks::prune_floor_refused(&room, req.before_epoch) {
+        return files::record_refused(doc, refusal);
     }
     match storage::prune_chain(&state.epoch_links, &req.room_id, req.before_epoch).await {
         Ok((pruned, earliest_rung)) => {
-            audit_room(&room, &authorized, RoomOperation::MintEpoch, None);
+            audit_room(&room, &authorized, RoomOperation::PruneEpoch, None);
             respond(
                 doc,
                 PruneResponse {
@@ -2834,6 +2839,109 @@ mod tests {
         storage::create_room(&st.rooms, &room)
             .await
             .expect("register the room");
+    }
+
+    /// Take what `audit_room` recorded on this thread since the last call.
+    fn take_audited() -> Vec<&'static str> {
+        AUDITED.with(|audited| std::mem::take(&mut *audited.borrow_mut()))
+    }
+
+    /// `rooms/epoch/prune/0.1`: `admin` only (a `read` chain is `permissionDenied`), a floor
+    /// at or above the current epoch is refused (`notAhead`), and a prune that runs is
+    /// audited as `room.epoch.prune` — never as the mint it used to be logged as.
+    #[tokio::test]
+    async fn a_prune_needs_admin_and_is_audited_as_a_prune() {
+        // The test runtime is current-thread, so the host's handlers run on this thread
+        // and record to this thread's trail.
+        let (_d, st) = state();
+        let app = router(st);
+        let f = RoomFixture::new(Visibility::Open).await;
+        register(&app, &f).await;
+
+        // Advance once, so there is an epoch below the current one to prune to.
+        let (status, minted) = call(
+            &app,
+            ROOMS_EPOCH_MINT_TYPE,
+            serde_json::json!({
+                "roomId": f.room.room_id,
+                "epoch": f.room.epoch + 1,
+                "presentation": f.as_owner(),
+            }),
+            &f.owner,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{minted}");
+        let current = minted["epoch"].as_u64().unwrap();
+        take_audited();
+
+        // The agent's chain confers `read` only: refused, and nothing audited.
+        let (status, body) = call(
+            &app,
+            ROOMS_EPOCH_PRUNE_TYPE,
+            serde_json::json!({
+                "roomId": f.room.room_id,
+                "beforeEpoch": current - 1,
+                "presentation": f.as_agent(),
+                "reason": "not mine to decide",
+            }),
+            &f.agent,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(
+            !take_audited().contains(&"room.epoch.prune"),
+            "a refused prune must not be audited as one"
+        );
+
+        // The owner, at the current epoch: the whole chain would go, so it is refused.
+        let (status, body) = call(
+            &app,
+            ROOMS_EPOCH_PRUNE_TYPE,
+            serde_json::json!({
+                "roomId": f.room.room_id,
+                "beforeEpoch": current,
+                "presentation": f.as_owner(),
+            }),
+            &f.owner,
+        )
+        .await;
+        assert_ne!(
+            status,
+            StatusCode::OK,
+            "pruning to the current epoch: {body}"
+        );
+        assert_eq!(body["code"], "rooms/epoch/prune:notAhead", "{body}");
+        assert_eq!(body["details"]["epoch"].as_u64(), Some(current), "{body}");
+
+        // The owner, below it: performed, and audited as what it was.
+        take_audited();
+        let (status, body) = call(
+            &app,
+            ROOMS_EPOCH_PRUNE_TYPE,
+            serde_json::json!({
+                "roomId": f.room.room_id,
+                "beforeEpoch": current - 1,
+                "presentation": f.as_owner(),
+                "reason": "retention: past the agreed window",
+            }),
+            &f.owner,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["roomId"], f.room.room_id);
+        assert!(
+            body["pruned"].is_u64() && body["earliestRung"].is_u64(),
+            "{body}"
+        );
+        let logged = take_audited();
+        assert!(
+            logged.contains(&"room.epoch.prune"),
+            "the prune must be audited as a prune: {logged:?}"
+        );
+        assert!(
+            !logged.contains(&"room.epoch.mint"),
+            "a prune is not a mint: {logged:?}"
+        );
     }
 
     /// A room that does not chain refuses a rung, rather than storing one it said it would
