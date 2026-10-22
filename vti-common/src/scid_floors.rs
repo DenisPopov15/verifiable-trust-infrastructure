@@ -289,7 +289,7 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let (_dir, ks) = open_ks();
-        let resolver = resolver().await;
+        let live = resolver().await;
         let late = Arc::new(AtomicBool::new(false));
         let gate = late.clone();
         let authorised: Authorised = Arc::new(move |did: String| {
@@ -301,13 +301,13 @@ mod tests {
         let (stop, shutdown) = watch::channel(false);
         let task = spawn(
             ks.clone(),
-            resolver.clone(),
+            live.clone(),
             authorised,
             shutdown,
             Duration::from_secs(3600),
         );
 
-        let book = resolver.scid_sources();
+        let book = live.scid_sources();
         assert!(book.add_source("did:scid:vh:1:QmMember?src=a.example/m"));
         assert!(book.add_source("did:scid:vh:1:QmStranger?src=b.example"));
         assert!(book.add_source("did:scid:vh:1:QmLater?src=c.example"));
