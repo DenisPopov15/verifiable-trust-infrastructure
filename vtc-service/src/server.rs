@@ -1608,6 +1608,17 @@ pub async fn run(
     // is settled from the effect it recorded.
     // (Suspensions were reconciled above, before the git-ns projector.)
     crate::admin_actions::spawn_sweeper(state.clone(), shutdown_rx.clone());
+    // The did:scid version floors of the community's members and administrators,
+    // persisted as the resolver learns them so a restart does not reset what it
+    // refuses (VTI-KEY-162).
+    if let Some(resolver) = state.did_resolver.clone() {
+        crate::scid_sources::spawn(
+            state.members_ks.clone(),
+            state.acl_ks.clone(),
+            resolver,
+            shutdown_rx.clone(),
+        );
+    }
     // Members who left the community leave the rooms it owns (`members/add` item 6): the
     // one owner of those removals, resuming at start whatever a restart interrupted.
     crate::rooms::departures::spawn(state.clone(), shutdown_rx.clone());
