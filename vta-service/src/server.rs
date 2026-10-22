@@ -658,6 +658,17 @@ pub async fn build_app_state(
     )
     .await;
 
+    // The did:scid identities this VTA authorises resolve by their bare DID,
+    // and refuse a log older than one verified before, from the first request
+    // after a restart (VTI-KEY-162).
+    if let Some(resolver) = auth.did_resolver.as_ref() {
+        match vti_common::scid_floors::seed(&acl_ks, resolver).await {
+            Ok(0) => {}
+            Ok(n) => info!(seeded = n, "did:scid floors seeded from the store"),
+            Err(e) => warn!(error = %e, "did:scid floors not seeded"),
+        }
+    }
+
     // Telemetry sink: reuse the run-path's live sink when injected, else a
     // fresh ring buffer for non-axum front-ends.
     let telemetry: vti_common::telemetry::SharedTelemetrySink = parts
@@ -1298,6 +1309,13 @@ pub async fn run(
                     Err(e) => warn!(error = %e, "key custody scan failed"),
                 }
             });
+        }
+
+        // The did:scid version floors of every ACL subject, persisted as the
+        // resolver learns them so a restart does not reset what it refuses
+        // (VTI-KEY-162).
+        if let Some(resolver) = app_state.did_resolver.clone() {
+            crate::scid_floors::spawn(app_state.acl_ks.clone(), resolver, shutdown_rx.clone());
         }
 
         // A room's revocation list that a registration left `pending` at its host is
