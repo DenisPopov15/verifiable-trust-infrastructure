@@ -708,7 +708,8 @@ aws-smithy-types = ">=1.6.1, <1.9"
 # 0.32.8: vtc/config/did-hosting/list/0.1 (trust-tasks-tf #849) — the VTA's
 # hosting servers the console offers for `dids.webvh_server`.
 # 0.33.2: vault/credentials/present/0.1 and the `credentialPresent` capability
-# (trust-tasks-tf #871).
+# (trust-tasks-tf #871); vta/webvh/dids/create/1.2 — `didMethod` and
+# `scidAlsoKnownAs` (trust-tasks-tf #862).
 trust-tasks-rs = { version = "0.33.2", default-features = false, features = [
   "validate",
   "all-specs",
@@ -745,7 +746,8 @@ trust-tasks-didcomm = { version = "0.33", default-features = false }
 # the context gates live. Using the crate's sealing API needs a signer seam
 # upstream, of the shape `affinidi_data_integrity::Signer` already provides.
 trust-tasks-tsp = { version = "0.33", default-features = false }
-trust-tasks-proof = { version = "0.33", default-features = false, features = ["affinidi"] }
+# 0.33.2: a did:scid key named with its `?src=` locator verifies (trust-tasks-tf #863).
+trust-tasks-proof = { version = "0.33.2", default-features = false, features = ["affinidi"] }
 
 # Axum extras (typed headers for Bearer auth)
 axum-extra = { version = "0.12", features = ["typed-header"] }
