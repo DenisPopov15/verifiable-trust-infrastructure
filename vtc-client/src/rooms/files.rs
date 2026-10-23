@@ -24,8 +24,12 @@ use trust_tasks_rs::specs::rooms::blobs::upload::{
     commit::v0_2 as upload_commit_v2,
 };
 use trust_tasks_rs::specs::rooms::info::v0_1 as room_info;
+use trust_tasks_rs::specs::rooms::info::v0_2 as room_info_v2;
 use trust_tasks_rs::specs::rooms::records::get::v0_2 as get_v2;
+use trust_tasks_rs::specs::rooms::records::prune::v0_1 as records_prune;
 use trust_tasks_rs::specs::rooms::records::put::v0_2 as put_v2;
+use trust_tasks_rs::specs::rooms::records::put::v0_3 as put_v3;
+use trust_tasks_rs::specs::rooms::records::retention::set::v0_1 as retention_set;
 
 use super::{RoomSession, SealedContent};
 use crate::{VtcClient, VtcError};
@@ -36,7 +40,11 @@ pub use blob_get_v2::TransferTarget as ReadTarget;
 pub use download_chunk::Response as DownloadChunkResponse;
 pub use get_v2::Response as GetRecordV2Response;
 pub use put_v2::Response as PutRecordV2Response;
+pub use put_v3::Response as PutRecordV3Response;
+pub use records_prune::Response as PruneRecordsResponse;
+pub use retention_set::Response as RetentionSetResponse;
 pub use room_info::Response as RoomInfoResponse;
+pub use room_info_v2::Response as RoomInfoV2Response;
 pub use upload_begin::Response as BeginUploadResponse;
 pub use upload_begin_v2::{Response as BeginUploadV2Response, TransferTarget as WriteTarget};
 pub use upload_chunk::Response as UploadChunkResponse;
@@ -501,6 +509,135 @@ impl VtcClient {
         let uri = put_v2::Payload::TYPE_URI;
         let v = self
             .room_task(uri, p, signer_did, private_key_multibase)
+            .await?;
+        response(uri, v)
+    }
+
+    /// `rooms/info/0.2`: 0.1's answer, the room's record retention in force (absent when it
+    /// states none) and its latest record prune.
+    pub async fn room_info_v2(
+        &self,
+        session: &RoomSession,
+        signer_did: &str,
+        private_key_multibase: &str,
+    ) -> Result<RoomInfoV2Response, VtcError> {
+        let p = payload::<room_info_v2::Payload>(serde_json::json!({
+            "roomId": session.room_id,
+            "presentation": session.presentation,
+        }))?;
+        let uri = room_info_v2::Payload::TYPE_URI;
+        let v = self
+            .room_task(uri, p, signer_did, private_key_multibase)
+            .await?;
+        response(uri, v)
+    }
+
+    /// `rooms/records/prune/0.1`: remove the records the room's record retention makes
+    /// eligible — `retracted` tombstones, `aged` records, or both. Needs `admin`.
+    ///
+    /// **Irreversible, for every member**: what is removed is removed outright, tombstones
+    /// included, and the room keeps only a mark that records went. `dry_run` reports what
+    /// would go and changes nothing — ask it first. `removed: 0` is a success. Refused
+    /// `noRetention` when the room states no rule for any kind asked.
+    ///
+    /// Never retried here: eligibility is a function of time, so a second prune is not a
+    /// repeat of the first.
+    pub async fn prune_records(
+        &self,
+        session: &RoomSession,
+        kinds: &[&str],
+        reason: &str,
+        dry_run: bool,
+        signer_did: &str,
+        private_key_multibase: &str,
+    ) -> Result<PruneRecordsResponse, VtcError> {
+        let mut value = serde_json::json!({
+            "roomId": session.room_id,
+            "presentation": session.presentation,
+            "kinds": kinds,
+            "reason": reason,
+        });
+        if dry_run {
+            value["dryRun"] = serde_json::json!(true);
+        }
+        let p = payload::<records_prune::Payload>(value)?;
+        let uri = records_prune::Payload::TYPE_URI;
+        let v = self
+            .room_task(uri, p, signer_did, private_key_multibase)
+            .await?;
+        response(uri, v)
+    }
+
+    /// `rooms/records/retention/set/0.1`: replace the room's record retention whole
+    /// (`{}` clears it). `expected` is the retention the caller believes is in force — the
+    /// host refuses `retentionConflict` otherwise, so two administrators do not overwrite
+    /// each other unseen. Needs `admin`. Removes nothing; the next prune applies it.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn set_record_retention(
+        &self,
+        session: &RoomSession,
+        retention: serde_json::Value,
+        expected: Option<serde_json::Value>,
+        reason: &str,
+        signer_did: &str,
+        private_key_multibase: &str,
+    ) -> Result<RetentionSetResponse, VtcError> {
+        let mut value = serde_json::json!({
+            "roomId": session.room_id,
+            "presentation": session.presentation,
+            "recordRetention": retention,
+            "reason": reason,
+        });
+        if let Some(e) = expected {
+            value["expectedRetention"] = e;
+        }
+        serde_json::from_value::<retention_set::Payload>(value.clone())
+            .map_err(|e| VtcError::Url(format!("payload refused by its schema: {e}")))?;
+        let uri = retention_set::Payload::TYPE_URI;
+        let v = self
+            .room_task(uri, value, signer_did, private_key_multibase)
+            .await?;
+        response(uri, v)
+    }
+
+    /// `rooms/records/put/0.3`: write an `open` room's record whose `cleartext` may carry
+    /// its provenance (`basis`, `confidence`, `evidence`, `validFor`) and `validUntil`.
+    ///
+    /// On this tier nothing is signed by the author: every member is the writer's claim as
+    /// the host stores it, and the host stores and serves it as received and never acts on
+    /// it. A sealed room carries the same members inside the signed body instead
+    /// ([`super::body::SealedRecordBody`]) and writes with 0.2.
+    ///
+    /// The payload is checked against the generated type but sent **as given**, so a
+    /// `validUntil` reaches the host in the spelling the writer chose.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn put_cleartext_record_v3(
+        &self,
+        session: &RoomSession,
+        key: &str,
+        cleartext: serde_json::Value,
+        blobs: &[String],
+        expected_version: Option<u64>,
+        signer_did: &str,
+        private_key_multibase: &str,
+    ) -> Result<PutRecordV3Response, VtcError> {
+        let mut value = serde_json::json!({
+            "roomId": session.room_id,
+            "key": key,
+            "presentation": session.presentation,
+            "cleartext": cleartext,
+        });
+        if !blobs.is_empty() {
+            value["blobs"] = serde_json::json!(blobs);
+        }
+        if let Some(v) = expected_version {
+            value["expectedVersion"] = serde_json::json!(v);
+        }
+        serde_json::from_value::<put_v3::Payload>(value.clone())
+            .map_err(|e| VtcError::Url(format!("payload refused by its schema: {e}")))?;
+        let uri = put_v3::Payload::TYPE_URI;
+        let v = self
+            .room_task(uri, value, signer_did, private_key_multibase)
             .await?;
         response(uri, v)
     }

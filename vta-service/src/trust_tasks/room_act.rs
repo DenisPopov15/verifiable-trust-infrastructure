@@ -882,6 +882,13 @@ const BODY_MEMBERS: &[&str] = &[
     "description",
     "body",
     "tags",
+    // Provenance and expiry (trust-tasks-tf #865): inside the signature, never seen by a
+    // host, display and weighting only.
+    "basis",
+    "confidence",
+    "evidence",
+    "validFor",
+    "validUntil",
     "file",
 ];
 const BODY_REQUIRED: &[&str] = &["roomId", "key", "version", "author"];
@@ -916,6 +923,9 @@ fn unsigned_body(plaintext: &[u8]) -> Result<Value, String> {
     {
         return Err("`author` is a DID".into());
     }
+    // A record's provenance is the author's to state and this agent's only to check the
+    // shape of: it is signed as given, and confers nothing.
+    vti_rooms::provenance::check(obj)?;
     Ok(value)
 }
 
@@ -1812,6 +1822,9 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 mirror_of: None,
+                record_retention: None,
+                last_prune: None,
+                epoch_floor: None,
             },
         )
         .await
@@ -1959,6 +1972,9 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 mirror_of: None,
+                record_retention: None,
+                last_prune: None,
+                epoch_floor: None,
             },
         )
         .await
@@ -2478,7 +2494,9 @@ mod tests {
                             record[k] = v.clone();
                         }
                         record
-                    } else if task == vti_rooms::wire::ROOMS_RECORDS_LIST_TYPE {
+                    } else if task == vti_rooms::wire::ROOMS_RECORDS_LIST_TYPE
+                        || task == vti_rooms::wire::ROOMS_RECORDS_LIST_V3_TYPE
+                    {
                         json!({ "records": [] })
                     } else {
                         json!({ "roomId": room_id, "links": [] })

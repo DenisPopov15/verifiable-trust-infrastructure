@@ -176,6 +176,68 @@ pub async fn prune_chain(
     Ok((dropped, earliest))
 }
 
+/// [`prune_chain`], and the room's **epoch floor** raised to the higher of the floor it held
+/// and `before_epoch − 1` (`rooms/epoch/prune/0.2`, *The floor, and the off-by-one*) —
+/// raised even when no rung is dropped (a gap, a `fromJoin` room), and never lowered.
+/// Every version of the prune raises it: the floor is a property of the room, not of the
+/// request that moved it. Returns `(pruned, earliest_rung, epoch_floor)`.
+///
+/// The floor is written **before** the rungs go, so a prune interrupted between the two
+/// leaves a room that already refuses to serve what it is about to erase.
+pub async fn prune_chain_to_floor(
+    rooms: &KeyspaceHandle,
+    links: &KeyspaceHandle,
+    room_id: &str,
+    before_epoch: u32,
+    now: u64,
+) -> Result<(usize, u32, u32), AppError> {
+    let mut room = get_room(rooms, room_id).await?;
+    let floor = room
+        .epoch_floor
+        .unwrap_or(0)
+        .max(before_epoch.saturating_sub(1))
+        .max(1);
+    room.epoch_floor = Some(floor);
+    room.updated_at = now;
+    rooms.insert(room_key(room_id), &room).await?;
+    let (pruned, earliest) = prune_chain(links, room_id, before_epoch).await?;
+    Ok((pruned, earliest, floor))
+}
+
+/// The rungs a host may serve for `room`: every one it holds numbered **above** the room's
+/// epoch floor (`EpochFloor`: a host never serves a rung at or below it), ascending.
+pub async fn servable_epoch_links(
+    links: &KeyspaceHandle,
+    room: &Room,
+) -> Result<Vec<EpochLink>, AppError> {
+    let floor = room.epoch_floor.unwrap_or(0);
+    Ok(list_epoch_links(links, &room.room_id)
+        .await?
+        .into_iter()
+        .filter(|l| l.epoch > floor)
+        .collect())
+}
+
+/// Store a rung for `room`, refusing one numbered at or below the room's epoch floor
+/// (`EpochFloor`: a host never stores or accepts such a rung) as well as everything
+/// [`put_epoch_link`] refuses.
+pub async fn put_epoch_link_above_floor(
+    links: &KeyspaceHandle,
+    room: &Room,
+    link: &EpochLink,
+) -> Result<(), AppError> {
+    if let Some(floor) = room.epoch_floor
+        && link.epoch <= floor
+    {
+        return Err(AppError::Validation(format!(
+            "room `{}` has forgotten its history below epoch {floor}; it accepts no rung at \
+             or below it",
+            room.room_id
+        )));
+    }
+    put_epoch_link(links, &room.room_id, link).await
+}
+
 /// Prefix for the commits a host relays.
 const COMMITS_PREFIX: &str = "room-commit:";
 
@@ -898,6 +960,124 @@ pub async fn purge_record(
     records.remove(k).await
 }
 
+/// The records a prune of `kinds` at `now` would remove under `retention`
+/// ([`crate::record_retention::is_eligible`]), tombstones included, by version.
+///
+/// The caller holds the record-write lock ([`crate::blobs::BlobHost::records_lock`]), so
+/// the set it removes is the set decided here.
+pub async fn eligible_records(
+    records: &KeyspaceHandle,
+    room_id: &str,
+    retention: &crate::record_retention::RecordRetention,
+    kinds: &[crate::record_retention::PruneKind],
+    now: u64,
+) -> Result<Vec<Record>, AppError> {
+    Ok(list_records(records, room_id, None, None)
+        .await?
+        .into_iter()
+        .filter(|r| crate::record_retention::is_eligible(r, retention, kinds, now))
+        .collect())
+}
+
+/// Remove the records `keys` outright — key, version, status, body, tombstone — and leave
+/// the room its mark: the next version from its counter, the time and the count
+/// (`rooms/records/prune/0.1` item 5). `keys` must not be empty: a prune that removed
+/// nothing takes no version and leaves no mark.
+///
+/// # Order, for a process that dies part-way
+///
+/// The room row — the version and the mark — is written **first**, then the records go. A
+/// prune interrupted after the mark leaves records the mark already counted; they are
+/// still eligible, and the next prune removes them under a mark of its own. The other order
+/// would leave records gone with no mark, so an incremental reader could never learn they
+/// went — the failure `lastPrune` exists to prevent. Nothing of a removed record is kept.
+pub async fn remove_pruned(
+    rooms: &KeyspaceHandle,
+    records: &KeyspaceHandle,
+    room_id: &str,
+    keys: &[String],
+    now: u64,
+) -> Result<crate::record_retention::RecordPrune, AppError> {
+    if keys.is_empty() {
+        return Err(AppError::Internal(
+            "a prune that removes nothing leaves no mark".into(),
+        ));
+    }
+    let mut room = get_room(rooms, room_id).await?;
+    let mark = crate::record_retention::RecordPrune {
+        version: room.next_version,
+        at: now,
+        removed: keys.len() as u64,
+    };
+    room.next_version += 1;
+    room.last_prune = Some(mark);
+    room.updated_at = now;
+    rooms.insert(room_key(room_id), &room).await?;
+    for key in keys {
+        records.remove(record_key(room_id, key)).await?;
+    }
+    Ok(mark)
+}
+
+/// Replace the room's record retention whole (`rooms/records/retention/set/0.1` item 4);
+/// `None` clears it. Returns the one it replaced. Removes nothing.
+pub async fn set_record_retention(
+    rooms: &KeyspaceHandle,
+    room_id: &str,
+    retention: Option<crate::record_retention::RecordRetention>,
+    now: u64,
+) -> Result<Option<crate::record_retention::RecordRetention>, AppError> {
+    let mut room = get_room(rooms, room_id).await?;
+    let previous = std::mem::replace(&mut room.record_retention, retention);
+    room.updated_at = now;
+    rooms.insert(room_key(room_id), &room).await?;
+    Ok(previous)
+}
+
+/// [`tree_head`], with `headVersion` taken as the higher of the highest record's version
+/// and the room's latest prune (`HeadVersion`): a prune removes leaves and takes a version
+/// like any other change to the tree, so a root before it and a root after it are never
+/// labelled alike.
+///
+/// A snapshot only under the record-write lock: a prune writes the room's mark and removes
+/// records under it, so a host computing a head for an answer holds it too
+/// ([`crate::blobs::BlobHost::read_snapshot`]).
+pub async fn room_tree_head(
+    rooms: &KeyspaceHandle,
+    records: &KeyspaceHandle,
+    room_id: &str,
+) -> Result<crate::merkle::TreeHead, AppError> {
+    let mut head = tree_head(records, room_id).await?;
+    head.head_version = head.head_version.max(pruned_at(rooms, room_id).await?);
+    Ok(head)
+}
+
+/// [`tree_head_with_trace`], with `headVersion` as [`room_tree_head`] takes it.
+pub async fn room_tree_head_with_trace(
+    rooms: &KeyspaceHandle,
+    records: &KeyspaceHandle,
+    room_id: &str,
+    key: &str,
+) -> Result<
+    (
+        crate::merkle::TreeHead,
+        Option<crate::merkle::InclusionProof>,
+    ),
+    AppError,
+> {
+    let (mut head, trace) = tree_head_with_trace(records, room_id, key).await?;
+    head.head_version = head.head_version.max(pruned_at(rooms, room_id).await?);
+    Ok((head, trace))
+}
+
+/// The version of the room's latest prune, `0` if it has none.
+async fn pruned_at(rooms: &KeyspaceHandle, room_id: &str) -> Result<u64, AppError> {
+    Ok(get_room(rooms, room_id)
+        .await?
+        .last_prune
+        .map_or(0, |p| p.version))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -948,6 +1128,9 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             mirror_of: None,
+            record_retention: None,
+            last_prune: None,
+            epoch_floor: None,
         }
     }
 
@@ -1871,6 +2054,9 @@ mod tests {
     fn mirror(id: &str, visibility: Visibility) -> Room {
         Room {
             mirror_of: Some("https://primary.example.org".into()),
+            record_retention: None,
+            last_prune: None,
+            epoch_floor: None,
             ..room(id, visibility)
         }
     }

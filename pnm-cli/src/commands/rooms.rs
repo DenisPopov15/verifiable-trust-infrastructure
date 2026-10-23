@@ -20,7 +20,7 @@ use vta_sdk::client::VtaClient;
 
 use crate::cli::{
     RoomCommands, RoomFileCommands, RoomKeysCommands, RoomOffersCommands, RoomOwnerCommands,
-    RoomProfileCommands,
+    RoomProfileCommands, RoomRecordsCommands, RoomRetentionCommands,
 };
 
 /// The operator's DID and key, from the session this CLI authenticates with.
@@ -529,7 +529,21 @@ pub(crate) async fn run(
             host_did,
             title,
             expected_version,
+            basis,
+            confidence,
+            cite_records,
+            cite_credentials,
+            purposes,
+            use_note,
+            valid_until,
         } => {
+            // `declared` unless named: what the operator typed is their own statement, which
+            // is what a client relaying its member's words writes (`SealedRecordBody`).
+            let (basis, basis_named) = match basis.as_deref() {
+                None => (Some(rooms::RecordBasis::Declared), false),
+                Some("unstated") => (None, true),
+                Some(b) => (Some(b.parse::<rooms::RecordBasis>()?), true),
+            };
             rooms::cmd_rooms_put(
                 client,
                 RoomTarget {
@@ -541,6 +555,16 @@ pub(crate) async fn run(
                 title,
                 body,
                 expected_version,
+                rooms::RecordProvenance {
+                    basis,
+                    basis_named,
+                    confidence,
+                    cite_records,
+                    cite_credentials,
+                    purposes,
+                    use_note,
+                    valid_until,
+                },
             )
             .await
         }
@@ -611,6 +635,74 @@ pub(crate) async fn run(
             )
             .await
         }
+        RoomCommands::Records { command } => match command {
+            RoomRecordsCommands::Prune {
+                room_id,
+                host,
+                host_did,
+                kinds,
+                reason,
+                dry_run,
+                yes,
+            } => {
+                rooms::cmd_rooms_records_prune(
+                    client,
+                    RoomTarget {
+                        host_url: &host,
+                        host_did: host_did.as_deref(),
+                        room_id: &room_id,
+                    },
+                    signer,
+                    kinds,
+                    reason,
+                    dry_run,
+                    yes,
+                )
+                .await
+            }
+            RoomRecordsCommands::Retention { command } => match command {
+                RoomRetentionCommands::Show {
+                    room_id,
+                    host,
+                    host_did,
+                } => {
+                    rooms::cmd_rooms_retention_show(
+                        client,
+                        RoomTarget {
+                            host_url: &host,
+                            host_did: host_did.as_deref(),
+                            room_id: &room_id,
+                        },
+                        signer,
+                    )
+                    .await
+                }
+                RoomRetentionCommands::Set {
+                    room_id,
+                    host,
+                    host_did,
+                    tombstone_days,
+                    record_days,
+                    clear,
+                    reason,
+                } => {
+                    rooms::cmd_rooms_retention_set(
+                        client,
+                        RoomTarget {
+                            host_url: &host,
+                            host_did: host_did.as_deref(),
+                            room_id: &room_id,
+                        },
+                        signer,
+                        tombstone_days,
+                        record_days,
+                        clear,
+                        reason,
+                    )
+                    .await
+                }
+            },
+        },
         RoomCommands::Keys { command } => match command {
             RoomKeysCommands::Commit {
                 room_id,
