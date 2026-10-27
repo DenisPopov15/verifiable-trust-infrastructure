@@ -2894,7 +2894,7 @@ mod tests {
         let (_d, st) = state();
         let (status, body) = call(
             &router(st),
-            "https://trusttasks.org/spec/vtc/members/list/0.1",
+            "https://trusttasks.org/spec/vtc/members/list/0.2",
             serde_json::json!({}),
             &Party::new(),
         )
