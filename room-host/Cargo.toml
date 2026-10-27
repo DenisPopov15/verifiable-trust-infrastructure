@@ -150,7 +150,7 @@ didcomm = [
 # rather than a simulator. Everything `tests/carrier.rs` covers is packing,
 # routing, threading and acking — a simulator would be a second opinion about
 # exactly the parts that were wrong.
-affinidi-messaging-test-mediator = { version = "0.45", features = ["tsp"] }
+affinidi-messaging-test-mediator = { version = "0.46", features = ["tsp"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 vti-rooms-dtg = { path = "../vti-rooms-dtg", features = ["test-support"] }
@@ -173,3 +173,7 @@ vti-rooms = { path = "../vti-rooms", features = ["test-support"] }
 getrandom = "0.4"
 reqwest = { workspace = true }
 uuid = { workspace = true }
+
+[lints.rust]
+# See `[workspace.lints.rust]` in the workspace Cargo.toml.
+deprecated = "allow"
