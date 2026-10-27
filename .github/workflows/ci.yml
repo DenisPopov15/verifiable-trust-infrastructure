@@ -676,6 +676,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # trust-tasks-rs with every spec does not fit in the runner's RAM; see
+      # .github/actions/add-swap.
+      - uses: ./.github/actions/add-swap
       - name: Install system dependencies
         run: bash scripts/install-build-deps.sh libtss2-dev
       - name: Install the Rust toolchain
@@ -739,6 +742,9 @@ jobs:
       # `vta-cli-common` (libdbus-sys -> pkg_config), and a failed baseline build
       # is reported as a broken PUBLISHED crate — which looked like a finding
       # rather than a missing build dependency on the runner.
+      # trust-tasks-rs with every spec does not fit in the runner's RAM; see
+      # .github/actions/add-swap.
+      - uses: ./.github/actions/add-swap
       - name: Install system dependencies
         run: bash scripts/install-build-deps.sh libtss2-dev
       - name: Install the Rust toolchain
@@ -1663,6 +1669,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # trust-tasks-rs with every spec does not fit in the runner's RAM; see
+      # .github/actions/add-swap.
+      - uses: ./.github/actions/add-swap
 
       - name: Install system dependencies
         if: runner.os == 'Linux'
